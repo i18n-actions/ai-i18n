@@ -1,0 +1,98 @@
+name: 'i18n Translate Action'
+description: 'Automatically translate i18n files using LLM providers (Anthropic, OpenAI, Ollama)'
+author: 'Your Name'
+
+branding:
+  icon: 'globe'
+  color: 'blue'
+
+inputs:
+  provider:
+    description: 'LLM provider to use (anthropic, openai, ollama)'
+    required: true
+    default: 'anthropic'
+
+  api-key:
+    description: 'API key for the LLM provider (not required for Ollama)'
+    required: false
+
+  model:
+    description: 'Model to use for translation'
+    required: false
+    default: ''
+
+  source-language:
+    description: 'Source language code (e.g., en, en-US)'
+    required: true
+    default: 'en'
+
+  target-languages:
+    description: 'Comma-separated list of target language codes'
+    required: true
+
+  files:
+    description: 'Glob pattern for translation files'
+    required: true
+    default: '**/*.xliff'
+
+  format:
+    description: 'File format (xliff-1.2, xliff-2.0, json-flat, json-nested, auto)'
+    required: false
+    default: 'auto'
+
+  config-file:
+    description: 'Path to configuration file'
+    required: false
+    default: '.i18n-translate.yml'
+
+  commit:
+    description: 'Whether to commit changes'
+    required: false
+    default: 'true'
+
+  commit-message:
+    description: 'Commit message template'
+    required: false
+    default: 'chore(i18n): update translations'
+
+  batch-size:
+    description: 'Number of strings to translate per API call'
+    required: false
+    default: '10'
+
+  max-retries:
+    description: 'Maximum number of retries for failed API calls'
+    required: false
+    default: '3'
+
+  ollama-url:
+    description: 'Ollama server URL (for ollama provider)'
+    required: false
+    default: 'http://localhost:11434'
+
+  dry-run:
+    description: 'Run without making actual changes'
+    required: false
+    default: 'false'
+
+  context:
+    description: 'Additional context for translations'
+    required: false
+    default: ''
+
+outputs:
+  translated-count:
+    description: 'Number of strings translated'
+
+  files-updated:
+    description: 'Number of files updated'
+
+  report:
+    description: 'Translation report in markdown format'
+
+  commit-sha:
+    description: 'SHA of the commit (if committed)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'

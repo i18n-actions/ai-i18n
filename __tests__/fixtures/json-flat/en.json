@@ -1,0 +1,9 @@
+{
+  "greeting": "Hello, World!",
+  "welcome": "Welcome to our application",
+  "items_count": "{count, plural, one {# item} other {# items}}",
+  "button.save": "Save changes",
+  "button.cancel": "Cancel",
+  "error.required": "This field is required",
+  "user.greeting": "Hello, {name}!"
+}

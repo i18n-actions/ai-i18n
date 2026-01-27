@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="2.0" srcLang="en" trgLang="fr" xmlns="urn:oasis:names:tc:xliff:document:2.0">
+  <file id="messages">
+    <unit id="greeting">
+      <notes>
+        <note>A simple greeting message</note>
+      </notes>
+      <segment>
+        <source>Hello, World!</source>
+        <target></target>
+      </segment>
+    </unit>
+    <unit id="welcome">
+      <segment>
+        <source>Welcome to our application</source>
+        <target></target>
+      </segment>
+    </unit>
+    <unit id="items_count">
+      <notes>
+        <note>Plural form for item count</note>
+      </notes>
+      <segment>
+        <source>{count, plural, one {# item} other {# items}}</source>
+        <target></target>
+      </segment>
+    </unit>
+    <unit id="button.save">
+      <segment>
+        <source>Save changes</source>
+        <target></target>
+      </segment>
+    </unit>
+    <unit id="button.cancel">
+      <segment>
+        <source>Cancel</source>
+        <target></target>
+      </segment>
+    </unit>
+    <unit id="error.required">
+      <segment>
+        <source>This field is required</source>
+        <target></target>
+      </segment>
+    </unit>
+    <unit id="user.greeting">
+      <notes>
+        <note>Personalized greeting with user name placeholder</note>
+      </notes>
+      <segment>
+        <source>Hello, {name}!</source>
+        <target></target>
+      </segment>
+    </unit>
+  </file>
+</xliff>

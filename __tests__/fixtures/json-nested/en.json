@@ -1,0 +1,23 @@
+{
+  "greeting": "Hello, World!",
+  "welcome": "Welcome to our application",
+  "items_count": "{count, plural, one {# item} other {# items}}",
+  "button": {
+    "save": "Save changes",
+    "cancel": "Cancel"
+  },
+  "error": {
+    "required": "This field is required",
+    "validation": {
+      "email": "Please enter a valid email address",
+      "minLength": "Must be at least {min} characters"
+    }
+  },
+  "user": {
+    "greeting": "Hello, {name}!",
+    "profile": {
+      "title": "User Profile",
+      "edit": "Edit Profile"
+    }
+  }
+}
