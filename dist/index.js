@@ -51732,6 +51732,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const fs = __importStar(__nccwpck_require__(9896));
+const path = __importStar(__nccwpck_require__(6928));
 const loader_1 = __nccwpck_require__(1839);
 const factory_1 = __nccwpck_require__(9807);
 const differ_1 = __nccwpck_require__(2);
@@ -51744,6 +51745,7 @@ const reporter_1 = __nccwpck_require__(5124);
 const markdown_1 = __nccwpck_require__(3976);
 const logger_1 = __nccwpck_require__(7893);
 const errors_1 = __nccwpck_require__(6550);
+const output_path_1 = __nccwpck_require__(305);
 const HASH_STORE_FILE = '.i18n-hashes.json';
 /**
  * Main entry point for the GitHub Action
@@ -51857,9 +51859,9 @@ async function processLanguage(config, targetLanguage, orchestrator, hashStore, 
     // Process each file
     for (const extractResult of extractResults) {
         try {
-            const wasUpdated = await processFile(config, extractResult, targetLanguage, orchestrator, hashStore, reportBuilder);
-            if (wasUpdated) {
-                updatedFiles.push(extractResult.filePath);
+            const outputFilePath = await processFile(config, extractResult, targetLanguage, orchestrator, hashStore, reportBuilder);
+            if (outputFilePath) {
+                updatedFiles.push(outputFilePath);
             }
         }
         catch (error) {
@@ -51874,6 +51876,8 @@ async function processLanguage(config, targetLanguage, orchestrator, hashStore, 
  */
 async function processFile(config, extractResult, targetLanguage, orchestrator, hashStore, reportBuilder) {
     logger_1.logger.info(`Processing ${extractResult.filePath}`);
+    // Generate the language-specific output file path
+    const outputFilePath = (0, output_path_1.getOutputFilePath)(extractResult.filePath, targetLanguage, config.files.sourceLanguage);
     // Diff against hash store to find changes
     const diffResult = (0, differ_1.diffAgainstStore)(extractResult.filePath, extractResult.units, hashStore);
     // Get units that need translation
@@ -51881,14 +51885,14 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
     if (unitsToTranslate.length === 0) {
         logger_1.logger.info(`No changes detected in ${extractResult.filePath}`);
         reportBuilder.addFileReport({
-            filePath: extractResult.filePath,
+            filePath: outputFilePath,
             targetLanguage,
             unitsProcessed: extractResult.units.length,
             unitsTranslated: 0,
             unitsFailed: 0,
             unitsSkipped: extractResult.units.length,
         });
-        return false;
+        return null;
     }
     logger_1.logger.info(`Found ${unitsToTranslate.length} unit(s) to translate`);
     // Create translation request
@@ -51909,9 +51913,24 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
         const translation = translationMap.get(unit.id);
         return translation ? { ...unit, target: translation } : unit;
     });
-    // Write back to file if not dry run
+    // Write to language-specific output file if not dry run
     if (!config.dryRun) {
-        await (0, factory_3.writeTranslations)(extractResult.filePath, extractResult.originalContent, updatedUnits, extractResult, { markAsTranslated: true });
+        const absoluteOutputPath = path.resolve(outputFilePath);
+        if (fs.existsSync(absoluteOutputPath)) {
+            // Output file exists - read it and merge translations
+            const existingContent = fs.readFileSync(absoluteOutputPath, 'utf-8');
+            const existingExtract = (0, factory_1.extractFromFile)(outputFilePath, targetLanguage, {
+                format: config.files.format === 'auto' ? undefined : config.files.format,
+            });
+            // Merge new translations with existing content
+            const mergedUnits = mergeTranslationUnits(existingExtract.units, updatedUnits);
+            await (0, factory_3.writeTranslations)(outputFilePath, existingContent, mergedUnits, existingExtract, { markAsTranslated: true });
+        }
+        else {
+            // Output file doesn't exist - create it
+            logger_1.logger.info(`Creating new translation file: ${outputFilePath}`);
+            (0, factory_3.createTranslationFile)(outputFilePath, updatedUnits, extractResult.formatInfo.format, config.files.sourceLanguage, targetLanguage, { markAsTranslated: true });
+        }
         // Update hash store
         (0, hasher_1.addToHashStore)(hashStore, extractResult.filePath, extractResult.units);
     }
@@ -51919,14 +51938,43 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
     const skipped = extractResult.units.length - unitsToTranslate.length;
     const failed = unitsToTranslate.length - response.translations.length;
     reportBuilder.addFileReport({
-        filePath: extractResult.filePath,
+        filePath: outputFilePath,
         targetLanguage,
         unitsProcessed: extractResult.units.length,
         unitsTranslated: response.translations.length,
         unitsFailed: failed,
         unitsSkipped: skipped,
     });
-    return response.translations.length > 0;
+    return response.translations.length > 0 ? outputFilePath : null;
+}
+/**
+ * Merge translation units, preferring new translations over existing ones
+ */
+function mergeTranslationUnits(existingUnits, newUnits) {
+    const newUnitsMap = new Map(newUnits.map(u => [u.id, u]));
+    // Start with existing units, update with new translations
+    const result = [];
+    const processedIds = new Set();
+    // First, process all existing units and update them if new translations exist
+    for (const existing of existingUnits) {
+        const newUnit = newUnitsMap.get(existing.id);
+        if (newUnit && newUnit.target) {
+            // Update with new translation
+            result.push({ ...existing, target: newUnit.target, source: newUnit.source });
+        }
+        else {
+            // Keep existing
+            result.push(existing);
+        }
+        processedIds.add(existing.id);
+    }
+    // Then, add any new units that weren't in the existing file
+    for (const newUnit of newUnits) {
+        if (!processedIds.has(newUnit.id)) {
+            result.push(newUnit);
+        }
+    }
+    return result;
 }
 /**
  * Commit changes to git
@@ -54269,6 +54317,119 @@ function createLogger() {
 }
 // Default logger instance
 exports.logger = createLogger();
+
+
+/***/ }),
+
+/***/ 305:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.getOutputFilePath = getOutputFilePath;
+exports.isLanguageSpecificPath = isLanguageSpecificPath;
+const path = __importStar(__nccwpck_require__(6928));
+/**
+ * Generate a language-specific output file path.
+ *
+ * Transforms a source file path to include the target language code.
+ * Examples:
+ *   - messages.xlf + 'de' → messages.de.xlf
+ *   - src/i18n/messages.xlf + 'es' → src/i18n/messages.es.xlf
+ *   - locale/en.json + 'fr' → locale/fr.json
+ *
+ * @param sourcePath - The original source file path
+ * @param targetLanguage - The target language code (e.g., 'de', 'es', 'fr')
+ * @param sourceLanguage - The source language code (e.g., 'en')
+ * @returns The language-specific output file path
+ */
+function getOutputFilePath(sourcePath, targetLanguage, sourceLanguage) {
+    const dir = path.dirname(sourcePath);
+    const ext = path.extname(sourcePath);
+    const baseName = path.basename(sourcePath, ext);
+    // Check if the filename already contains the source language code
+    // e.g., "messages.en.xlf" or "en.json"
+    const sourcePattern = new RegExp(`[._-]${escapeRegex(sourceLanguage)}$`, 'i');
+    if (sourcePattern.test(baseName)) {
+        // Replace source language with target language
+        // e.g., "messages.en" → "messages.de"
+        const newBaseName = baseName.replace(sourcePattern, (match) => {
+            // Preserve the separator character (., -, or _)
+            const separator = match.charAt(0);
+            return `${separator}${targetLanguage}`;
+        });
+        return path.join(dir, `${newBaseName}${ext}`);
+    }
+    // Check if the basename is just the source language code
+    // e.g., "en.json" → "de.json"
+    if (baseName.toLowerCase() === sourceLanguage.toLowerCase()) {
+        return path.join(dir, `${targetLanguage}${ext}`);
+    }
+    // Otherwise, insert the target language before the extension
+    // e.g., "messages.xlf" → "messages.de.xlf"
+    return path.join(dir, `${baseName}.${targetLanguage}${ext}`);
+}
+/**
+ * Check if a path appears to be a language-specific file.
+ *
+ * @param filePath - The file path to check
+ * @param languageCode - The language code to look for
+ * @returns true if the file appears to be language-specific
+ */
+function isLanguageSpecificPath(filePath, languageCode) {
+    const ext = path.extname(filePath);
+    const baseName = path.basename(filePath, ext);
+    // Check for patterns like "messages.de.xlf", "messages_de.xlf", "messages-de.xlf"
+    const pattern = new RegExp(`[._-]${escapeRegex(languageCode)}$`, 'i');
+    if (pattern.test(baseName)) {
+        return true;
+    }
+    // Check if the basename is just the language code
+    if (baseName.toLowerCase() === languageCode.toLowerCase()) {
+        return true;
+    }
+    return false;
+}
+/**
+ * Escape special regex characters in a string.
+ */
+function escapeRegex(str) {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 
 /***/ }),

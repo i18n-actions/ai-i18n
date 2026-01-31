@@ -1,9 +1,10 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
+import * as path from 'path';
 import { loadConfig } from './config/loader';
 import type { ActionConfig } from './config/types';
 import type { TranslationUnit, ExtractResult, TranslationRequest } from './types/translation';
-import { extractFromPattern } from './extractors/factory';
+import { extractFromPattern, extractFromFile } from './extractors/factory';
 import { diffAgainstStore, getUnitsNeedingTranslation } from './differ/differ';
 import {
   createHashStore,
@@ -12,13 +13,14 @@ import {
   parseHashStore,
 } from './differ/hasher';
 import { createOrchestrator } from './translators/factory';
-import { writeTranslations } from './formatters/factory';
+import { writeTranslations, createTranslationFile } from './formatters/factory';
 import { createGitClient } from './git/client';
 import { createLoopDetector, shouldSkipFromEnv } from './git/commit-detector';
 import { ReportBuilder, publishToActions, createErrorEntry } from './reporter/reporter';
 import { generateMarkdownReport } from './reporter/markdown';
 import { logger } from './utils/logger';
 import { I18nTranslateError } from './utils/errors';
+import { getOutputFilePath } from './utils/output-path';
 
 const HASH_STORE_FILE = '.i18n-hashes.json';
 
@@ -179,7 +181,7 @@ async function processLanguage(
   // Process each file
   for (const extractResult of extractResults) {
     try {
-      const wasUpdated = await processFile(
+      const outputFilePath = await processFile(
         config,
         extractResult,
         targetLanguage,
@@ -188,8 +190,8 @@ async function processLanguage(
         reportBuilder
       );
 
-      if (wasUpdated) {
-        updatedFiles.push(extractResult.filePath);
+      if (outputFilePath) {
+        updatedFiles.push(outputFilePath);
       }
     } catch (error) {
       logger.error(`Failed to process ${extractResult.filePath}: ${error}`);
@@ -217,8 +219,15 @@ async function processFile(
   orchestrator: ReturnType<typeof createOrchestrator>,
   hashStore: ReturnType<typeof createHashStore>,
   reportBuilder: ReportBuilder
-): Promise<boolean> {
+): Promise<string | null> {
   logger.info(`Processing ${extractResult.filePath}`);
+
+  // Generate the language-specific output file path
+  const outputFilePath = getOutputFilePath(
+    extractResult.filePath,
+    targetLanguage,
+    config.files.sourceLanguage
+  );
 
   // Diff against hash store to find changes
   const diffResult = diffAgainstStore(extractResult.filePath, extractResult.units, hashStore);
@@ -229,14 +238,14 @@ async function processFile(
   if (unitsToTranslate.length === 0) {
     logger.info(`No changes detected in ${extractResult.filePath}`);
     reportBuilder.addFileReport({
-      filePath: extractResult.filePath,
+      filePath: outputFilePath,
       targetLanguage,
       unitsProcessed: extractResult.units.length,
       unitsTranslated: 0,
       unitsFailed: 0,
       unitsSkipped: extractResult.units.length,
     });
-    return false;
+    return null;
   }
 
   logger.info(`Found ${unitsToTranslate.length} unit(s) to translate`);
@@ -263,15 +272,39 @@ async function processFile(
     return translation ? { ...unit, target: translation } : unit;
   });
 
-  // Write back to file if not dry run
+  // Write to language-specific output file if not dry run
   if (!config.dryRun) {
-    await writeTranslations(
-      extractResult.filePath,
-      extractResult.originalContent,
-      updatedUnits,
-      extractResult,
-      { markAsTranslated: true }
-    );
+    const absoluteOutputPath = path.resolve(outputFilePath);
+
+    if (fs.existsSync(absoluteOutputPath)) {
+      // Output file exists - read it and merge translations
+      const existingContent = fs.readFileSync(absoluteOutputPath, 'utf-8');
+      const existingExtract = extractFromFile(outputFilePath, targetLanguage, {
+        format: config.files.format === 'auto' ? undefined : config.files.format,
+      });
+
+      // Merge new translations with existing content
+      const mergedUnits = mergeTranslationUnits(existingExtract.units, updatedUnits);
+
+      await writeTranslations(
+        outputFilePath,
+        existingContent,
+        mergedUnits,
+        existingExtract,
+        { markAsTranslated: true }
+      );
+    } else {
+      // Output file doesn't exist - create it
+      logger.info(`Creating new translation file: ${outputFilePath}`);
+      createTranslationFile(
+        outputFilePath,
+        updatedUnits,
+        extractResult.formatInfo.format,
+        config.files.sourceLanguage,
+        targetLanguage,
+        { markAsTranslated: true }
+      );
+    }
 
     // Update hash store
     addToHashStore(hashStore, extractResult.filePath, extractResult.units);
@@ -282,7 +315,7 @@ async function processFile(
   const failed = unitsToTranslate.length - response.translations.length;
 
   reportBuilder.addFileReport({
-    filePath: extractResult.filePath,
+    filePath: outputFilePath,
     targetLanguage,
     unitsProcessed: extractResult.units.length,
     unitsTranslated: response.translations.length,
@@ -290,7 +323,43 @@ async function processFile(
     unitsSkipped: skipped,
   });
 
-  return response.translations.length > 0;
+  return response.translations.length > 0 ? outputFilePath : null;
+}
+
+/**
+ * Merge translation units, preferring new translations over existing ones
+ */
+function mergeTranslationUnits(
+  existingUnits: TranslationUnit[],
+  newUnits: TranslationUnit[]
+): TranslationUnit[] {
+  const newUnitsMap = new Map(newUnits.map(u => [u.id, u]));
+
+  // Start with existing units, update with new translations
+  const result: TranslationUnit[] = [];
+  const processedIds = new Set<string>();
+
+  // First, process all existing units and update them if new translations exist
+  for (const existing of existingUnits) {
+    const newUnit = newUnitsMap.get(existing.id);
+    if (newUnit && newUnit.target) {
+      // Update with new translation
+      result.push({ ...existing, target: newUnit.target, source: newUnit.source });
+    } else {
+      // Keep existing
+      result.push(existing);
+    }
+    processedIds.add(existing.id);
+  }
+
+  // Then, add any new units that weren't in the existing file
+  for (const newUnit of newUnits) {
+    if (!processedIds.has(newUnit.id)) {
+      result.push(newUnit);
+    }
+  }
+
+  return result;
 }
 
 /**
