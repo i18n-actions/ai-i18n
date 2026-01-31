@@ -48447,7 +48447,7 @@ exports.providerConfigSchema = zod_1.z
  * Translation configuration schema
  */
 exports.translationConfigSchema = zod_1.z.object({
-    batchSize: zod_1.z.number().int().positive().max(100).default(10),
+    batchSize: zod_1.z.number().int().positive().max(1000).default(10),
     maxRetries: zod_1.z.number().int().min(0).max(10).default(3),
     retryDelayMs: zod_1.z.number().int().positive().max(60000).default(1000),
     rateLimitPerMinute: zod_1.z.number().int().positive().optional(),
@@ -48500,7 +48500,7 @@ exports.configFileSchema = zod_1.z.object({
         .optional(),
     translation: zod_1.z
         .object({
-        batchSize: zod_1.z.number().int().positive().max(100).optional(),
+        batchSize: zod_1.z.number().int().positive().max(1000).optional(),
         maxRetries: zod_1.z.number().int().min(0).max(10).optional(),
         retryDelayMs: zod_1.z.number().int().positive().max(60000).optional(),
         rateLimitPerMinute: zod_1.z.number().int().positive().optional(),

@@ -60,7 +60,7 @@ export const providerConfigSchema = z
  * Translation configuration schema
  */
 export const translationConfigSchema = z.object({
-  batchSize: z.number().int().positive().max(100).default(10),
+  batchSize: z.number().int().positive().max(1000).default(10),
   maxRetries: z.number().int().min(0).max(10).default(3),
   retryDelayMs: z.number().int().positive().max(60000).default(1000),
   rateLimitPerMinute: z.number().int().positive().optional(),
@@ -117,7 +117,7 @@ export const configFileSchema = z.object({
     .optional(),
   translation: z
     .object({
-      batchSize: z.number().int().positive().max(100).optional(),
+      batchSize: z.number().int().positive().max(1000).optional(),
       maxRetries: z.number().int().min(0).max(10).optional(),
       retryDelayMs: z.number().int().positive().max(60000).optional(),
       rateLimitPerMinute: z.number().int().positive().optional(),
