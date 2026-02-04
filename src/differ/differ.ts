@@ -52,18 +52,30 @@ export function diffUnits(
     let changeType: ChangeType;
 
     if (!previousHash) {
-      // New unit
-      changeType = 'new';
-      summary.new++;
+      // New unit - never seen before
+      if (opts.translateMissingTargets && !unit.target) {
+        // New unit without target needs translation
+        changeType = 'new';
+        summary.new++;
+      } else if (!unit.target) {
+        // New unit but translateMissingTargets is false, skip
+        changeType = 'unchanged';
+        summary.unchanged++;
+        if (!opts.includeUnchanged) {
+          continue;
+        }
+      } else {
+        // New unit with target (shouldn't happen often)
+        changeType = 'new';
+        summary.new++;
+      }
     } else if (!hashesMatch(currentHash, previousHash)) {
-      // Source changed
+      // Source changed - needs re-translation
       changeType = 'modified';
       summary.modified++;
-    } else if (opts.translateMissingTargets && !unit.target) {
-      // Source unchanged but no target translation
-      changeType = 'new';
-      summary.new++;
     } else {
+      // Hash matches - trust that translation exists (don't check unit.target)
+      // The hash store is the source of truth for what's been translated
       // No changes
       changeType = 'unchanged';
       summary.unchanged++;
