@@ -52,9 +52,23 @@ describe('Differ', () => {
       expect(result.summary.deleted).toBe(1);
     });
 
-    it('should treat missing target as new when translateMissingTargets is true', () => {
+    it('should trust hash store over missing target when hash matches', () => {
+      // When hash exists and matches, trust that translation exists
+      // (targets live in separate files, extracted units won't have them)
       const current = [createUnit('1', 'Hello')]; // No target
       const previousHashes = new Map([['1', hashContent('Hello')]]);
+
+      const result = diffUnits(current, previousHashes, { translateMissingTargets: true });
+
+      // Hash matches = unchanged, regardless of missing target
+      expect(result.summary.unchanged).toBe(1);
+      expect(result.summary.new).toBe(0);
+    });
+
+    it('should treat missing target as new when translateMissingTargets is true and no hash exists', () => {
+      // translateMissingTargets only applies to truly NEW units (no hash in store)
+      const current = [createUnit('1', 'Hello')]; // No target
+      const previousHashes = new Map(); // Empty store - unit is new
 
       const result = diffUnits(current, previousHashes, { translateMissingTargets: true });
 
