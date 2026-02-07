@@ -48884,16 +48884,22 @@ function createHashStore() {
     };
 }
 /**
- * Add file hashes to store
+ * Add file hashes to store (merges with existing hashes)
  */
 function addToHashStore(store, filePath, units) {
-    const unitHashes = {};
+    // Get existing hashes for this file (if any)
+    const existingEntry = store.files[filePath];
+    const existingHashes = existingEntry?.units ?? {};
+    // Build new hashes from the provided units
+    const newHashes = {};
     for (const unit of units) {
-        unitHashes[unit.id] = hashContent(unit.source);
+        newHashes[unit.id] = hashContent(unit.source);
     }
+    // MERGE: existing hashes + new hashes (new hashes take precedence)
+    const mergedHashes = { ...existingHashes, ...newHashes };
     store.files[filePath] = {
         fileHash: hashFileContent(units),
-        units: unitHashes,
+        units: mergedHashes,
     };
     store.generated = new Date().toISOString();
 }

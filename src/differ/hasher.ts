@@ -120,22 +120,29 @@ export function createHashStore(): HashStore {
 }
 
 /**
- * Add file hashes to store
+ * Add file hashes to store (merges with existing hashes)
  */
 export function addToHashStore(
   store: HashStore,
   filePath: string,
   units: Array<{ id: string; source: string }>
 ): void {
-  const unitHashes: Record<string, string> = {};
+  // Get existing hashes for this file (if any)
+  const existingEntry = store.files[filePath];
+  const existingHashes = existingEntry?.units ?? {};
 
+  // Build new hashes from the provided units
+  const newHashes: Record<string, string> = {};
   for (const unit of units) {
-    unitHashes[unit.id] = hashContent(unit.source);
+    newHashes[unit.id] = hashContent(unit.source);
   }
+
+  // MERGE: existing hashes + new hashes (new hashes take precedence)
+  const mergedHashes = { ...existingHashes, ...newHashes };
 
   store.files[filePath] = {
     fileHash: hashFileContent(units),
-    units: unitHashes,
+    units: mergedHashes,
   };
   store.generated = new Date().toISOString();
 }

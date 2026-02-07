@@ -48,7 +48,7 @@ export interface HashStore {
  */
 export declare function createHashStore(): HashStore;
 /**
- * Add file hashes to store
+ * Add file hashes to store (merges with existing hashes)
  */
 export declare function addToHashStore(store: HashStore, filePath: string, units: Array<{
     id: string;
