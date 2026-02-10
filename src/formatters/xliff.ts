@@ -6,6 +6,7 @@ import type {
   FormatResult,
   TranslationUnit,
   FormatInfo,
+  XliffPlaceholder,
 } from '../types/translation';
 import { BaseFormatter, FormatOptions, mergeUnits, countChanges } from './base';
 
@@ -142,6 +143,9 @@ export class XliffFormatter extends BaseFormatter {
             typeof item === 'object' && item !== null && 'target' in item
         );
 
+        // Build target content with placeholders restored
+        const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
+
         if (targetIndex === -1) {
           // Insert target after source
           const sourceIndex = transUnit.findIndex(
@@ -151,7 +155,7 @@ export class XliffFormatter extends BaseFormatter {
 
           if (sourceIndex !== -1) {
             const targetNode: Record<string, unknown> = {
-              target: [{ '#text': unit.target }],
+              target: targetContent,
             };
 
             if (options?.markAsTranslated) {
@@ -163,7 +167,7 @@ export class XliffFormatter extends BaseFormatter {
         } else {
           // Update existing target
           const targetNode = transUnit[targetIndex];
-          targetNode['target'] = [{ '#text': unit.target }];
+          targetNode['target'] = targetContent;
 
           if (options?.markAsTranslated) {
             if (!targetNode[':@']) {
@@ -230,6 +234,9 @@ export class XliffFormatter extends BaseFormatter {
           return;
         }
 
+        // Build target content with placeholders restored
+        const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
+
         // Find or create target in segment
         const targetIndex = segment.findIndex(
           (item): item is Record<string, unknown> =>
@@ -245,12 +252,12 @@ export class XliffFormatter extends BaseFormatter {
 
           if (sourceIndex !== -1) {
             segment.splice(sourceIndex + 1, 0, {
-              target: [{ '#text': unit.target }],
+              target: targetContent,
             });
           }
         } else {
           // Update existing target
-          segment[targetIndex]['target'] = [{ '#text': unit.target }];
+          segment[targetIndex]['target'] = targetContent;
         }
 
         // Update segment state if requested
@@ -289,5 +296,73 @@ export class XliffFormatter extends BaseFormatter {
         }
       }
     }
+  }
+
+  /**
+   * Build target element content with placeholders restored
+   * Converts placeholder markers (e.g., {{PH}}) back to XML elements
+   */
+  private buildTargetContent(
+    text: string,
+    placeholders?: XliffPlaceholder[]
+  ): Array<Record<string, unknown>> {
+    // If no placeholders, return simple text node
+    if (!placeholders || placeholders.length === 0) {
+      return [{ '#text': text }];
+    }
+
+    // Create a map of marker -> placeholder for quick lookup
+    const placeholderMap = new Map<string, XliffPlaceholder>();
+    for (const ph of placeholders) {
+      placeholderMap.set(ph.marker, ph);
+    }
+
+    // Build regex to match all placeholder markers
+    // Escape special regex characters in markers
+    const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
+
+    // Split text by placeholders and build content array
+    const result: Array<Record<string, unknown>> = [];
+    const parts = text.split(markerRegex);
+
+    for (const part of parts) {
+      if (!part) {
+        continue;
+      }
+
+      const placeholder = placeholderMap.get(part);
+      if (placeholder) {
+        // This is a placeholder marker - restore the XML element
+        const element = this.buildPlaceholderElement(placeholder);
+        result.push(element);
+      } else {
+        // This is regular text
+        result.push({ '#text': part });
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Build a placeholder XML element from placeholder metadata
+   */
+  private buildPlaceholderElement(placeholder: XliffPlaceholder): Record<string, unknown> {
+    const { tagName, attributes } = placeholder;
+
+    // Convert attributes to fast-xml-parser format
+    const attrObj: Record<string, string> = {};
+    for (const [key, value] of Object.entries(attributes)) {
+      attrObj[`@_${key}`] = value;
+    }
+
+    // Self-closing elements like <x/> have attributes but no content
+    // The preserveOrder format uses arrays for element content
+    const element: Record<string, unknown> = {
+      [tagName]: [{ ':@': attrObj }],
+    };
+
+    return element;
   }
 }

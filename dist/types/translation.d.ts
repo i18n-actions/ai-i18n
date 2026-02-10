@@ -2,6 +2,17 @@
  * Core translation types used throughout the application
  */
 /**
+ * XLIFF inline placeholder element (x, ph, bx, ex, etc.)
+ */
+export interface XliffPlaceholder {
+    /** The placeholder marker used in the source text (e.g., "{{PH}}" or "{{0}}") */
+    marker: string;
+    /** The element tag name (x, ph, bx, ex, etc.) */
+    tagName: string;
+    /** The element attributes (id, equiv-text, ctype, etc.) */
+    attributes: Record<string, string>;
+}
+/**
  * Metadata associated with a translation unit
  */
 export interface TranslationUnitMetadata {
@@ -12,6 +23,8 @@ export interface TranslationUnitMetadata {
     maxLength?: number;
     state?: string;
     approved?: boolean;
+    /** XLIFF placeholder elements that need to be preserved in translations */
+    placeholders?: XliffPlaceholder[];
 }
 /**
  * A single translation unit (string to be translated)

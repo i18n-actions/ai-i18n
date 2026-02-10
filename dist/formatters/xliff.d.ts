@@ -24,5 +24,14 @@ export declare class XliffFormatter extends BaseFormatter {
      * Walk all nodes in parsed XML structure
      */
     private walkNodes;
+    /**
+     * Build target element content with placeholders restored
+     * Converts placeholder markers (e.g., {{PH}}) back to XML elements
+     */
+    private buildTargetContent;
+    /**
+     * Build a placeholder XML element from placeholder metadata
+     */
+    private buildPlaceholderElement;
 }
 //# sourceMappingURL=xliff.d.ts.map

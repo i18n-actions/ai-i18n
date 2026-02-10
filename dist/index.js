@@ -49589,7 +49589,11 @@ class XliffExtractor extends base_1.BaseExtractor {
                 if (!id) {
                     continue;
                 }
-                const source = this.extractTextContent(unit['source']);
+                // Extract source with placeholders preserved as markers
+                const sourceExtraction = this.extractContentWithPlaceholders(unit['source']);
+                const source = sourceExtraction.text;
+                const placeholders = sourceExtraction.placeholders;
+                // Extract target (simple extraction - we'll restore placeholders when formatting)
                 const target = this.extractTextContent(unit['target']);
                 // Get notes if requested
                 let notes;
@@ -49623,6 +49627,7 @@ class XliffExtractor extends base_1.BaseExtractor {
                         notes: notes || undefined,
                         state: unit['@_state'],
                         approved: unit['@_approved'] === 'yes',
+                        placeholders: placeholders.length > 0 ? placeholders : undefined,
                     },
                     hash,
                 });
@@ -49684,7 +49689,11 @@ class XliffExtractor extends base_1.BaseExtractor {
             if (!segment) {
                 continue;
             }
-            const source = this.extractTextContent(segment['source']);
+            // Extract source with placeholders preserved as markers
+            const sourceExtraction = this.extractContentWithPlaceholders(segment['source']);
+            const source = sourceExtraction.text;
+            const placeholders = sourceExtraction.placeholders;
+            // Extract target (simple extraction)
             const target = this.extractTextContent(segment['target']);
             // Get notes if requested
             let notes;
@@ -49707,6 +49716,7 @@ class XliffExtractor extends base_1.BaseExtractor {
                     file: filePath,
                     notes: notes || undefined,
                     state: segment['@_state'],
+                    placeholders: placeholders.length > 0 ? placeholders : undefined,
                 },
                 hash,
             });
@@ -49721,10 +49731,40 @@ class XliffExtractor extends base_1.BaseExtractor {
         }
         return Array.isArray(value) ? value : [value];
     }
+    /** XLIFF inline element tag names that should be treated as placeholders */
+    static PLACEHOLDER_TAGS = new Set([
+        'x', // XLIFF 1.2: standalone placeholder (e.g., interpolations)
+        'ph', // XLIFF 1.2/2.0: placeholder
+        'bx', // XLIFF 1.2: begin paired placeholder
+        'ex', // XLIFF 1.2: end paired placeholder
+        'bpt', // XLIFF 1.2: begin paired tag
+        'ept', // XLIFF 1.2: end paired tag
+        'it', // XLIFF 1.2: isolated tag
+        'g', // XLIFF 1.2: generic group inline
+        'mrk', // XLIFF 1.2: marker
+        'pc', // XLIFF 2.0: paired code
+        'sc', // XLIFF 2.0: start code
+        'ec', // XLIFF 2.0: end code
+    ]);
     /**
-     * Extract text content from element (handles mixed content)
+     * Context object for extracting text with placeholders
+     */
+    createPlaceholderContext() {
+        return { placeholders: [], counter: 0 };
+    }
+    /**
+     * Extract text content from element, preserving placeholders as markers
+     * Returns the text with placeholder markers (e.g., {{PH}}, {{0}})
      */
     extractTextContent(element) {
+        const ctx = this.createPlaceholderContext();
+        return this.extractTextWithPlaceholders(element, ctx);
+    }
+    /**
+     * Extract text and placeholders from element
+     * Returns text with markers, and populates the placeholders array
+     */
+    extractTextWithPlaceholders(element, ctx) {
         if (element === undefined || element === null) {
             return '';
         }
@@ -49734,30 +49774,81 @@ class XliffExtractor extends base_1.BaseExtractor {
         if (typeof element === 'object') {
             const obj = element;
             // Handle text node
-            if ('#text' in obj) {
+            if ('#text' in obj && Object.keys(obj).length === 1) {
                 return String(obj['#text']);
             }
             // Handle complex content (inline elements like <ph>, <x/>, etc.)
             let result = '';
             for (const [key, value] of Object.entries(obj)) {
                 if (key.startsWith('@_')) {
-                    continue;
-                } // Skip attributes
+                    continue; // Skip attributes at this level
+                }
                 if (key === '#text') {
                     result += String(value);
                 }
+                else if (XliffExtractor.PLACEHOLDER_TAGS.has(key)) {
+                    // This is a placeholder element - extract and create marker
+                    const placeholder = this.extractPlaceholder(key, value, ctx);
+                    result += placeholder.marker;
+                    ctx.placeholders.push(placeholder);
+                }
                 else if (Array.isArray(value)) {
                     for (const item of value) {
-                        result += this.extractTextContent(item);
+                        result += this.extractTextWithPlaceholders(item, ctx);
                     }
                 }
                 else if (typeof value === 'object' && value !== null) {
-                    result += this.extractTextContent(value);
+                    result += this.extractTextWithPlaceholders(value, ctx);
                 }
             }
             return result;
         }
         return String(element);
+    }
+    /**
+     * Extract a placeholder element and create its marker
+     */
+    extractPlaceholder(tagName, value, ctx) {
+        const attributes = {};
+        // Extract attributes from the element
+        if (typeof value === 'object' && value !== null) {
+            const obj = value;
+            for (const [key, val] of Object.entries(obj)) {
+                if (key.startsWith('@_')) {
+                    // This is an attribute
+                    attributes[key.substring(2)] = String(val);
+                }
+                // Note: inner text (#text) is ignored for placeholders as they're typically self-closing
+            }
+        }
+        // Determine the marker name - prefer 'id', then 'equiv-text', then counter
+        let markerName;
+        if (attributes['id']) {
+            markerName = attributes['id'];
+        }
+        else if (attributes['equiv-text']) {
+            // Clean up equiv-text for use as marker (remove special chars)
+            markerName = attributes['equiv-text'].replace(/[^a-zA-Z0-9_]/g, '_');
+        }
+        else {
+            markerName = String(ctx.counter++);
+        }
+        // Create the marker string - use double braces to be distinct
+        const marker = `{{${markerName}}}`;
+        return {
+            marker,
+            tagName,
+            attributes,
+        };
+    }
+    /**
+     * Extract text content and placeholders from a source/target element
+     * Returns both the text (with placeholder markers) and the placeholder array
+     */
+    extractContentWithPlaceholders(element) {
+        const ctx = this.createPlaceholderContext();
+        const text = this.extractTextWithPlaceholders(element, ctx);
+        return { text, placeholders: ctx.placeholders };
     }
     /**
      * Create hash of content for change detection
@@ -50414,12 +50505,14 @@ class XliffFormatter extends base_1.BaseFormatter {
                 updatedCount++;
                 // Find or create target element
                 const targetIndex = transUnit.findIndex((item) => typeof item === 'object' && item !== null && 'target' in item);
+                // Build target content with placeholders restored
+                const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
                 if (targetIndex === -1) {
                     // Insert target after source
                     const sourceIndex = transUnit.findIndex((item) => typeof item === 'object' && item !== null && 'source' in item);
                     if (sourceIndex !== -1) {
                         const targetNode = {
-                            target: [{ '#text': unit.target }],
+                            target: targetContent,
                         };
                         if (options?.markAsTranslated) {
                             targetNode[':@'] = { '@_state': 'translated' };
@@ -50430,7 +50523,7 @@ class XliffFormatter extends base_1.BaseFormatter {
                 else {
                     // Update existing target
                     const targetNode = transUnit[targetIndex];
-                    targetNode['target'] = [{ '#text': unit.target }];
+                    targetNode['target'] = targetContent;
                     if (options?.markAsTranslated) {
                         if (!targetNode[':@']) {
                             targetNode[':@'] = {};
@@ -50477,6 +50570,8 @@ class XliffFormatter extends base_1.BaseFormatter {
                 if (!Array.isArray(segment)) {
                     return;
                 }
+                // Build target content with placeholders restored
+                const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
                 // Find or create target in segment
                 const targetIndex = segment.findIndex((item) => typeof item === 'object' && item !== null && 'target' in item);
                 if (targetIndex === -1) {
@@ -50484,13 +50579,13 @@ class XliffFormatter extends base_1.BaseFormatter {
                     const sourceIndex = segment.findIndex((item) => typeof item === 'object' && item !== null && 'source' in item);
                     if (sourceIndex !== -1) {
                         segment.splice(sourceIndex + 1, 0, {
-                            target: [{ '#text': unit.target }],
+                            target: targetContent,
                         });
                     }
                 }
                 else {
                     // Update existing target
-                    segment[targetIndex]['target'] = [{ '#text': unit.target }];
+                    segment[targetIndex]['target'] = targetContent;
                 }
                 // Update segment state if requested
                 if (options?.markAsTranslated) {
@@ -50522,6 +50617,61 @@ class XliffFormatter extends base_1.BaseFormatter {
                 }
             }
         }
+    }
+    /**
+     * Build target element content with placeholders restored
+     * Converts placeholder markers (e.g., {{PH}}) back to XML elements
+     */
+    buildTargetContent(text, placeholders) {
+        // If no placeholders, return simple text node
+        if (!placeholders || placeholders.length === 0) {
+            return [{ '#text': text }];
+        }
+        // Create a map of marker -> placeholder for quick lookup
+        const placeholderMap = new Map();
+        for (const ph of placeholders) {
+            placeholderMap.set(ph.marker, ph);
+        }
+        // Build regex to match all placeholder markers
+        // Escape special regex characters in markers
+        const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
+        // Split text by placeholders and build content array
+        const result = [];
+        const parts = text.split(markerRegex);
+        for (const part of parts) {
+            if (!part) {
+                continue;
+            }
+            const placeholder = placeholderMap.get(part);
+            if (placeholder) {
+                // This is a placeholder marker - restore the XML element
+                const element = this.buildPlaceholderElement(placeholder);
+                result.push(element);
+            }
+            else {
+                // This is regular text
+                result.push({ '#text': part });
+            }
+        }
+        return result;
+    }
+    /**
+     * Build a placeholder XML element from placeholder metadata
+     */
+    buildPlaceholderElement(placeholder) {
+        const { tagName, attributes } = placeholder;
+        // Convert attributes to fast-xml-parser format
+        const attrObj = {};
+        for (const [key, value] of Object.entries(attributes)) {
+            attrObj[`@_${key}`] = value;
+        }
+        // Self-closing elements like <x/> have attributes but no content
+        // The preserveOrder format uses arrays for element content
+        const element = {
+            [tagName]: [{ ':@': attrObj }],
+        };
+        return element;
     }
 }
 exports.XliffFormatter = XliffFormatter;
@@ -52855,10 +53005,12 @@ CRITICAL RULES:
     if (opts.preservePlaceholders) {
         prompt += `
 5. PRESERVE all placeholders exactly as they appear:
+   - Double-brace placeholders like {{PH}}, {{0}}, {{remainingTime}}
    - Variables like {name}, {count}, {0}, {1}
    - HTML tags like <b>, </b>, <br/>
    - ICU format elements like {count, plural, ...}
-   - Do NOT translate placeholder names`;
+   - Do NOT translate placeholder names or content inside {{...}}
+   - The double-brace placeholders represent UI variables - keep them EXACTLY as-is`;
     }
     if (opts.preserveFormatting) {
         prompt += `
@@ -52990,8 +53142,8 @@ function validateTranslation(source, translation, options) {
     const opts = { ...DEFAULT_OPTIONS, ...options };
     const issues = [];
     if (opts.preservePlaceholders) {
-        // Extract placeholders from source
-        const placeholderRegex = /\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
+        // Extract placeholders from source (including {{...}} markers for XLIFF elements)
+        const placeholderRegex = /\{\{[^}]+\}\}|\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
         const sourcePlaceholders = new Set(source.match(placeholderRegex) ?? []);
         const translationPlaceholders = new Set(translation.match(placeholderRegex) ?? []);
         // Check for missing placeholders

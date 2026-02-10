@@ -61,10 +61,12 @@ CRITICAL RULES:
   if (opts.preservePlaceholders) {
     prompt += `
 5. PRESERVE all placeholders exactly as they appear:
+   - Double-brace placeholders like {{PH}}, {{0}}, {{remainingTime}}
    - Variables like {name}, {count}, {0}, {1}
    - HTML tags like <b>, </b>, <br/>
    - ICU format elements like {count, plural, ...}
-   - Do NOT translate placeholder names`;
+   - Do NOT translate placeholder names or content inside {{...}}
+   - The double-brace placeholders represent UI variables - keep them EXACTLY as-is`;
   }
 
   if (opts.preserveFormatting) {
@@ -240,8 +242,8 @@ export function validateTranslation(
   const issues: string[] = [];
 
   if (opts.preservePlaceholders) {
-    // Extract placeholders from source
-    const placeholderRegex = /\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
+    // Extract placeholders from source (including {{...}} markers for XLIFF elements)
+    const placeholderRegex = /\{\{[^}]+\}\}|\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
     const sourcePlaceholders = new Set(source.match(placeholderRegex) ?? []);
     const translationPlaceholders = new Set(translation.match(placeholderRegex) ?? []);
 

@@ -1,7 +1,12 @@
 import { XMLParser } from 'fast-xml-parser';
 import * as crypto from 'crypto';
 import { ExtractorError } from '../utils/errors';
-import type { ExtractResult, FormatInfo, TranslationUnit } from '../types/translation';
+import type {
+  ExtractResult,
+  FormatInfo,
+  TranslationUnit,
+  XliffPlaceholder,
+} from '../types/translation';
 import { BaseExtractor, ExtractOptions } from './base';
 
 /**
@@ -167,7 +172,12 @@ export class XliffExtractor extends BaseExtractor {
           continue;
         }
 
-        const source = this.extractTextContent(unit['source']);
+        // Extract source with placeholders preserved as markers
+        const sourceExtraction = this.extractContentWithPlaceholders(unit['source']);
+        const source = sourceExtraction.text;
+        const placeholders = sourceExtraction.placeholders;
+
+        // Extract target (simple extraction - we'll restore placeholders when formatting)
         const target = this.extractTextContent(unit['target']);
 
         // Get notes if requested
@@ -207,6 +217,7 @@ export class XliffExtractor extends BaseExtractor {
             notes: notes || undefined,
             state: unit['@_state'] as string | undefined,
             approved: unit['@_approved'] === 'yes',
+            placeholders: placeholders.length > 0 ? placeholders : undefined,
           },
           hash,
         });
@@ -292,7 +303,12 @@ export class XliffExtractor extends BaseExtractor {
         continue;
       }
 
-      const source = this.extractTextContent(segment['source']);
+      // Extract source with placeholders preserved as markers
+      const sourceExtraction = this.extractContentWithPlaceholders(segment['source']);
+      const source = sourceExtraction.text;
+      const placeholders = sourceExtraction.placeholders;
+
+      // Extract target (simple extraction)
       const target = this.extractTextContent(segment['target']);
 
       // Get notes if requested
@@ -320,6 +336,7 @@ export class XliffExtractor extends BaseExtractor {
           file: filePath,
           notes: notes || undefined,
           state: segment['@_state'] as string | undefined,
+          placeholders: placeholders.length > 0 ? placeholders : undefined,
         },
         hash,
       });
@@ -336,10 +353,46 @@ export class XliffExtractor extends BaseExtractor {
     return Array.isArray(value) ? value : [value];
   }
 
+  /** XLIFF inline element tag names that should be treated as placeholders */
+  private static readonly PLACEHOLDER_TAGS = new Set([
+    'x', // XLIFF 1.2: standalone placeholder (e.g., interpolations)
+    'ph', // XLIFF 1.2/2.0: placeholder
+    'bx', // XLIFF 1.2: begin paired placeholder
+    'ex', // XLIFF 1.2: end paired placeholder
+    'bpt', // XLIFF 1.2: begin paired tag
+    'ept', // XLIFF 1.2: end paired tag
+    'it', // XLIFF 1.2: isolated tag
+    'g', // XLIFF 1.2: generic group inline
+    'mrk', // XLIFF 1.2: marker
+    'pc', // XLIFF 2.0: paired code
+    'sc', // XLIFF 2.0: start code
+    'ec', // XLIFF 2.0: end code
+  ]);
+
   /**
-   * Extract text content from element (handles mixed content)
+   * Context object for extracting text with placeholders
+   */
+  private createPlaceholderContext(): { placeholders: XliffPlaceholder[]; counter: number } {
+    return { placeholders: [], counter: 0 };
+  }
+
+  /**
+   * Extract text content from element, preserving placeholders as markers
+   * Returns the text with placeholder markers (e.g., {{PH}}, {{0}})
    */
   private extractTextContent(element: unknown): string {
+    const ctx = this.createPlaceholderContext();
+    return this.extractTextWithPlaceholders(element, ctx);
+  }
+
+  /**
+   * Extract text and placeholders from element
+   * Returns text with markers, and populates the placeholders array
+   */
+  private extractTextWithPlaceholders(
+    element: unknown,
+    ctx: { placeholders: XliffPlaceholder[]; counter: number }
+  ): string {
     if (element === undefined || element === null) {
       return '';
     }
@@ -352,7 +405,7 @@ export class XliffExtractor extends BaseExtractor {
       const obj = element as Record<string, unknown>;
 
       // Handle text node
-      if ('#text' in obj) {
+      if ('#text' in obj && Object.keys(obj).length === 1) {
         return String(obj['#text']);
       }
 
@@ -360,22 +413,83 @@ export class XliffExtractor extends BaseExtractor {
       let result = '';
       for (const [key, value] of Object.entries(obj)) {
         if (key.startsWith('@_')) {
-          continue;
-        } // Skip attributes
+          continue; // Skip attributes at this level
+        }
         if (key === '#text') {
           result += String(value);
+        } else if (XliffExtractor.PLACEHOLDER_TAGS.has(key)) {
+          // This is a placeholder element - extract and create marker
+          const placeholder = this.extractPlaceholder(key, value, ctx);
+          result += placeholder.marker;
+          ctx.placeholders.push(placeholder);
         } else if (Array.isArray(value)) {
           for (const item of value) {
-            result += this.extractTextContent(item);
+            result += this.extractTextWithPlaceholders(item, ctx);
           }
         } else if (typeof value === 'object' && value !== null) {
-          result += this.extractTextContent(value);
+          result += this.extractTextWithPlaceholders(value, ctx);
         }
       }
       return result;
     }
 
     return String(element);
+  }
+
+  /**
+   * Extract a placeholder element and create its marker
+   */
+  private extractPlaceholder(
+    tagName: string,
+    value: unknown,
+    ctx: { placeholders: XliffPlaceholder[]; counter: number }
+  ): XliffPlaceholder {
+    const attributes: Record<string, string> = {};
+
+    // Extract attributes from the element
+    if (typeof value === 'object' && value !== null) {
+      const obj = value as Record<string, unknown>;
+      for (const [key, val] of Object.entries(obj)) {
+        if (key.startsWith('@_')) {
+          // This is an attribute
+          attributes[key.substring(2)] = String(val);
+        }
+        // Note: inner text (#text) is ignored for placeholders as they're typically self-closing
+      }
+    }
+
+    // Determine the marker name - prefer 'id', then 'equiv-text', then counter
+    let markerName: string;
+    if (attributes['id']) {
+      markerName = attributes['id'];
+    } else if (attributes['equiv-text']) {
+      // Clean up equiv-text for use as marker (remove special chars)
+      markerName = attributes['equiv-text'].replace(/[^a-zA-Z0-9_]/g, '_');
+    } else {
+      markerName = String(ctx.counter++);
+    }
+
+    // Create the marker string - use double braces to be distinct
+    const marker = `{{${markerName}}}`;
+
+    return {
+      marker,
+      tagName,
+      attributes,
+    };
+  }
+
+  /**
+   * Extract text content and placeholders from a source/target element
+   * Returns both the text (with placeholder markers) and the placeholder array
+   */
+  extractContentWithPlaceholders(element: unknown): {
+    text: string;
+    placeholders: XliffPlaceholder[];
+  } {
+    const ctx = this.createPlaceholderContext();
+    const text = this.extractTextWithPlaceholders(element, ctx);
+    return { text, placeholders: ctx.placeholders };
   }
 
   /**
