@@ -96,8 +96,15 @@ export class XliffFormatter extends BaseFormatter {
     const unitsWithTargets = units.filter(u => u.target).length;
     logger.debug(`XLIFF formatter: ${unitsWithTargets}/${units.length} units have targets`);
 
+    // Debug: show first 5 IDs in unitMap
+    const mapIds = Array.from(unitMap.keys()).slice(0, 5);
+    logger.info(`XLIFF formatter DEBUG: First 5 unitMap IDs: ${JSON.stringify(mapIds)}`);
+
     let foundCount = 0;
     let updatedCount = 0;
+    let notFoundCount = 0;
+    let noTargetCount = 0;
+    const sampleXmlIds: string[] = [];
 
     this.walkNodes(parsed, (node: Record<string, unknown>) => {
       if ('trans-unit' in node) {
@@ -126,12 +133,21 @@ export class XliffFormatter extends BaseFormatter {
           return;
         }
 
+        // Collect sample XML IDs
+        if (sampleXmlIds.length < 5) {
+          sampleXmlIds.push(id);
+        }
+
         const unit = unitMap.get(id);
         if (!unit) {
-          logger.debug(`Unit ${id} not found in unitMap`);
+          notFoundCount++;
+          if (notFoundCount <= 3) {
+            logger.info(`XLIFF formatter DEBUG: XML ID "${id}" not found in unitMap`);
+          }
           return;
         }
         if (!unit.target) {
+          noTargetCount++;
           return;
         }
 
@@ -179,6 +195,8 @@ export class XliffFormatter extends BaseFormatter {
       }
     });
 
+    logger.info(`XLIFF formatter DEBUG: First 5 XML IDs: ${JSON.stringify(sampleXmlIds)}`);
+    logger.info(`XLIFF formatter DEBUG: notFound=${notFoundCount}, noTarget=${noTargetCount}`);
     logger.info(
       `XLIFF formatter: found ${foundCount} trans-units in XML, updated ${updatedCount} with translations`
     );

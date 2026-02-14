@@ -50472,8 +50472,14 @@ class XliffFormatter extends base_1.BaseFormatter {
         const unitMap = new Map(units.map(u => [u.id, u]));
         const unitsWithTargets = units.filter(u => u.target).length;
         logger_1.logger.debug(`XLIFF formatter: ${unitsWithTargets}/${units.length} units have targets`);
+        // Debug: show first 5 IDs in unitMap
+        const mapIds = Array.from(unitMap.keys()).slice(0, 5);
+        logger_1.logger.info(`XLIFF formatter DEBUG: First 5 unitMap IDs: ${JSON.stringify(mapIds)}`);
         let foundCount = 0;
         let updatedCount = 0;
+        let notFoundCount = 0;
+        let noTargetCount = 0;
+        const sampleXmlIds = [];
         this.walkNodes(parsed, (node) => {
             if ('trans-unit' in node) {
                 foundCount++;
@@ -50494,12 +50500,20 @@ class XliffFormatter extends base_1.BaseFormatter {
                     logger_1.logger.debug(`No id found in attrs`);
                     return;
                 }
+                // Collect sample XML IDs
+                if (sampleXmlIds.length < 5) {
+                    sampleXmlIds.push(id);
+                }
                 const unit = unitMap.get(id);
                 if (!unit) {
-                    logger_1.logger.debug(`Unit ${id} not found in unitMap`);
+                    notFoundCount++;
+                    if (notFoundCount <= 3) {
+                        logger_1.logger.info(`XLIFF formatter DEBUG: XML ID "${id}" not found in unitMap`);
+                    }
                     return;
                 }
                 if (!unit.target) {
+                    noTargetCount++;
                     return;
                 }
                 updatedCount++;
@@ -50533,6 +50547,8 @@ class XliffFormatter extends base_1.BaseFormatter {
                 }
             }
         });
+        logger_1.logger.info(`XLIFF formatter DEBUG: First 5 XML IDs: ${JSON.stringify(sampleXmlIds)}`);
+        logger_1.logger.info(`XLIFF formatter DEBUG: notFound=${notFoundCount}, noTarget=${noTargetCount}`);
         logger_1.logger.info(`XLIFF formatter: found ${foundCount} trans-units in XML, updated ${updatedCount} with translations`);
     }
     /**
