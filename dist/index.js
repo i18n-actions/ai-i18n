@@ -50482,16 +50482,12 @@ class XliffFormatter extends base_1.BaseFormatter {
                     logger_1.logger.debug(`trans-unit is not an array`);
                     return;
                 }
-                // Find the trans-unit attributes
-                const attrs = transUnit.find((item) => typeof item === 'object' && item !== null && ':@' in item);
-                if (!attrs) {
-                    logger_1.logger.debug(`No attrs found for trans-unit`);
-                    return;
-                }
-                const attrsObj = attrs[':@'];
+                // In preserveOrder mode, attributes are siblings of the element key, not children
+                // Structure: { "trans-unit": [...], ":@": { "@_id": "123" } }
+                const attrsObj = node[':@'];
                 const id = attrsObj?.['@_id'];
                 if (!id) {
-                    logger_1.logger.debug(`No id found in attrs`);
+                    logger_1.logger.debug(`No @_id found for trans-unit`);
                     return;
                 }
                 const unit = unitMap.get(id);

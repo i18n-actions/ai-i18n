@@ -108,21 +108,12 @@ export class XliffFormatter extends BaseFormatter {
           return;
         }
 
-        // Find the trans-unit attributes
-        const attrs = transUnit.find(
-          (item): item is Record<string, unknown> =>
-            typeof item === 'object' && item !== null && ':@' in item
-        );
-
-        if (!attrs) {
-          logger.debug(`No attrs found for trans-unit`);
-          return;
-        }
-
-        const attrsObj = attrs[':@'] as Record<string, unknown>;
+        // In preserveOrder mode, attributes are siblings of the element key, not children
+        // Structure: { "trans-unit": [...], ":@": { "@_id": "123" } }
+        const attrsObj = node[':@'] as Record<string, unknown> | undefined;
         const id = attrsObj?.['@_id'] as string | undefined;
         if (!id) {
-          logger.debug(`No id found in attrs`);
+          logger.debug(`No @_id found for trans-unit`);
           return;
         }
 
