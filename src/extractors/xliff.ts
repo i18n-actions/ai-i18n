@@ -1,5 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
-import * as crypto from 'crypto';
+import { hashContent as sharedHashContent } from '../differ/hasher';
 import { ExtractorError } from '../utils/errors';
 import type {
   ExtractResult,
@@ -496,6 +496,6 @@ export class XliffExtractor extends BaseExtractor {
    * Create hash of content for change detection
    */
   private hashContent(content: string): string {
-    return crypto.createHash('sha256').update(content).digest('hex').substring(0, 16);
+    return sharedHashContent(content);
   }
 }

@@ -49433,47 +49433,14 @@ function flattenJson(obj, prefix = '') {
 /***/ }),
 
 /***/ 7142:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.XliffExtractor = void 0;
 const fast_xml_parser_1 = __nccwpck_require__(9741);
-const crypto = __importStar(__nccwpck_require__(6982));
+const hasher_1 = __nccwpck_require__(5981);
 const errors_1 = __nccwpck_require__(6550);
 const base_1 = __nccwpck_require__(84);
 /**
@@ -49854,7 +49821,7 @@ class XliffExtractor extends base_1.BaseExtractor {
      * Create hash of content for change detection
      */
     hashContent(content) {
-        return crypto.createHash('sha256').update(content).digest('hex').substring(0, 16);
+        return (0, hasher_1.hashContent)(content);
     }
 }
 exports.XliffExtractor = XliffExtractor;
@@ -50402,59 +50369,53 @@ function deepMerge(target, source) {
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.XliffFormatter = void 0;
-const fast_xml_parser_1 = __nccwpck_require__(9741);
 const errors_1 = __nccwpck_require__(6550);
 const logger_1 = __nccwpck_require__(7893);
 const base_1 = __nccwpck_require__(8746);
 /**
  * XLIFF formatter for 1.2 and 2.0 formats
+ *
+ * Uses targeted string replacement instead of full XML rebuild
+ * to preserve original file formatting and minimize diffs.
  */
 class XliffFormatter extends base_1.BaseFormatter {
     supportedFormats = ['xliff-1.2', 'xliff-2.0'];
     fileExtensions = ['.xliff', '.xlf', '.xml'];
-    parser = new fast_xml_parser_1.XMLParser({
-        ignoreAttributes: false,
-        attributeNamePrefix: '@_',
-        textNodeName: '#text',
-        preserveOrder: true,
-        trimValues: false,
-        parseAttributeValue: false,
-    });
-    builder = new fast_xml_parser_1.XMLBuilder({
-        ignoreAttributes: false,
-        attributeNamePrefix: '@_',
-        textNodeName: '#text',
-        preserveOrder: true,
-        format: true,
-        indentBy: '  ',
-        suppressEmptyNode: false,
-    });
     /**
      * Format XLIFF content with updated translations
+     *
+     * Only modifies <target> elements for units that changed,
+     * preserving the rest of the file byte-for-byte.
      */
     format(originalContent, updatedUnits, extractResult, options) {
         try {
-            const merged = (0, base_1.mergeUnits)(extractResult.units, updatedUnits);
             const changes = (0, base_1.countChanges)(extractResult.units, updatedUnits);
-            const updatedWithTargets = updatedUnits.filter(u => u.target).length;
-            const mergedWithTargets = merged.filter(u => u.target).length;
-            logger_1.logger.info(`XLIFF merge stats: input=${updatedUnits.length} (${updatedWithTargets} with targets), ` +
-                `merged=${merged.length} (${mergedWithTargets} with targets)`);
-            // Parse original to preserve structure
-            const parsed = this.parser.parse(originalContent);
-            // Update based on format version
-            if (extractResult.formatInfo.format === 'xliff-2.0') {
-                this.updateXliff2(parsed, merged, options);
+            // Build map: only units whose target actually changed
+            const originalMap = new Map(extractResult.units.map(u => [u.id, u]));
+            const unitsToUpdate = [];
+            for (const unit of updatedUnits) {
+                if (!unit.target) {
+                    continue;
+                }
+                const original = originalMap.get(unit.id);
+                if (!original || unit.target !== original.target) {
+                    unitsToUpdate.push(unit);
+                }
             }
-            else {
-                this.updateXliff1(parsed, merged, options);
+            logger_1.logger.info(`XLIFF formatter: ${unitsToUpdate.length} units to patch ` +
+                `(${updatedUnits.length} total, ${changes.updated} changed)`);
+            const unitTag = extractResult.formatInfo.format === 'xliff-2.0' ? 'unit' : 'trans-unit';
+            let content = originalContent;
+            let patchedCount = 0;
+            for (const unit of unitsToUpdate) {
+                const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options);
+                const patched = this.patchUnit(content, unit.id, targetXml, unitTag);
+                if (patched !== null) {
+                    content = patched;
+                    patchedCount++;
+                }
             }
-            // Rebuild XML
-            let content = this.builder.build(parsed);
-            // Ensure XML declaration
-            if (!content.startsWith('<?xml')) {
-                content = '<?xml version="1.0" encoding="UTF-8"?>\n' + content;
-            }
+            logger_1.logger.info(`XLIFF formatter: patched ${patchedCount} units in-place`);
             return {
                 content,
                 updatedCount: changes.updated,
@@ -50466,208 +50427,93 @@ class XliffFormatter extends base_1.BaseFormatter {
         }
     }
     /**
-     * Update XLIFF 1.2 structure with translations
+     * Patch a single trans-unit/unit in the XML string by replacing or inserting its <target>.
+     * Returns the patched string or null if the unit was not found.
      */
-    updateXliff1(parsed, units, options) {
-        const unitMap = new Map(units.map(u => [u.id, u]));
-        const unitsWithTargets = units.filter(u => u.target).length;
-        logger_1.logger.debug(`XLIFF formatter: ${unitsWithTargets}/${units.length} units have targets`);
-        let foundCount = 0;
-        let updatedCount = 0;
-        this.walkNodes(parsed, (node) => {
-            if ('trans-unit' in node) {
-                foundCount++;
-                const transUnit = node['trans-unit'];
-                if (!Array.isArray(transUnit)) {
-                    logger_1.logger.debug(`trans-unit is not an array`);
-                    return;
-                }
-                // In preserveOrder mode, attributes are siblings of the element key, not children
-                // Structure: { "trans-unit": [...], ":@": { "@_id": "123" } }
-                const attrsObj = node[':@'];
-                const id = attrsObj?.['@_id'];
-                if (!id) {
-                    logger_1.logger.debug(`No @_id found for trans-unit`);
-                    return;
-                }
-                const unit = unitMap.get(id);
-                if (!unit) {
-                    logger_1.logger.debug(`Unit ${id} not found in unitMap`);
-                    return;
-                }
-                if (!unit.target) {
-                    return;
-                }
-                updatedCount++;
-                // Find or create target element
-                const targetIndex = transUnit.findIndex((item) => typeof item === 'object' && item !== null && 'target' in item);
-                // Build target content with placeholders restored
-                const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
-                if (targetIndex === -1) {
-                    // Insert target after source
-                    const sourceIndex = transUnit.findIndex((item) => typeof item === 'object' && item !== null && 'source' in item);
-                    if (sourceIndex !== -1) {
-                        const targetNode = {
-                            target: targetContent,
-                        };
-                        if (options?.markAsTranslated) {
-                            targetNode[':@'] = { '@_state': 'translated' };
-                        }
-                        transUnit.splice(sourceIndex + 1, 0, targetNode);
-                    }
-                }
-                else {
-                    // Update existing target
-                    const targetNode = transUnit[targetIndex];
-                    targetNode['target'] = targetContent;
-                    if (options?.markAsTranslated) {
-                        if (!targetNode[':@']) {
-                            targetNode[':@'] = {};
-                        }
-                        targetNode[':@']['@_state'] = 'translated';
-                    }
-                }
-            }
-        });
-        logger_1.logger.info(`XLIFF formatter: found ${foundCount} trans-units in XML, updated ${updatedCount} with translations`);
-    }
-    /**
-     * Update XLIFF 2.0 structure with translations
-     */
-    updateXliff2(parsed, units, options) {
-        const unitMap = new Map(units.map(u => [u.id, u]));
-        this.walkNodes(parsed, (node) => {
-            if ('unit' in node) {
-                const unitNode = node['unit'];
-                if (!Array.isArray(unitNode)) {
-                    return;
-                }
-                // Find unit attributes
-                const attrs = unitNode.find((item) => typeof item === 'object' && item !== null && ':@' in item);
-                if (!attrs) {
-                    return;
-                }
-                const attrsObj = attrs[':@'];
-                const id = attrsObj?.['@_id'];
-                if (!id) {
-                    return;
-                }
-                const unit = unitMap.get(id);
-                if (!unit?.target) {
-                    return;
-                }
-                // Find segment element
-                const segmentIndex = unitNode.findIndex((item) => typeof item === 'object' && item !== null && 'segment' in item);
-                if (segmentIndex === -1) {
-                    return;
-                }
-                const segmentWrapper = unitNode[segmentIndex];
-                const segment = segmentWrapper['segment'];
-                if (!Array.isArray(segment)) {
-                    return;
-                }
-                // Build target content with placeholders restored
-                const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
-                // Find or create target in segment
-                const targetIndex = segment.findIndex((item) => typeof item === 'object' && item !== null && 'target' in item);
-                if (targetIndex === -1) {
-                    // Insert target after source
-                    const sourceIndex = segment.findIndex((item) => typeof item === 'object' && item !== null && 'source' in item);
-                    if (sourceIndex !== -1) {
-                        segment.splice(sourceIndex + 1, 0, {
-                            target: targetContent,
-                        });
-                    }
-                }
-                else {
-                    // Update existing target
-                    segment[targetIndex]['target'] = targetContent;
-                }
-                // Update segment state if requested
-                if (options?.markAsTranslated) {
-                    const segmentAttrs = segment.find((item) => typeof item === 'object' && item !== null && ':@' in item);
-                    if (segmentAttrs) {
-                        segmentAttrs[':@']['@_state'] = 'translated';
-                    }
-                    else {
-                        segment.unshift({ ':@': { '@_state': 'translated' } });
-                    }
-                }
-            }
-        });
-    }
-    /**
-     * Walk all nodes in parsed XML structure
-     */
-    walkNodes(nodes, callback) {
-        for (const node of nodes) {
-            if (typeof node !== 'object' || node === null) {
-                continue;
-            }
-            const nodeObj = node;
-            callback(nodeObj);
-            // Recurse into child arrays
-            for (const value of Object.values(nodeObj)) {
-                if (Array.isArray(value)) {
-                    this.walkNodes(value, callback);
-                }
-            }
+    patchUnit(content, unitId, targetXml, unitTag) {
+        const escapedId = unitId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Match the unit block: <trans-unit id="...">...</trans-unit>
+        const unitRegex = new RegExp(`(<${unitTag}\\s[^>]*?id="${escapedId}"[^>]*>)([\\s\\S]*?)(<\\/${unitTag}>)`);
+        const match = unitRegex.exec(content);
+        if (!match) {
+            logger_1.logger.debug(`Unit ${unitId} not found in XML content`);
+            return null;
         }
+        const unitContent = match[2];
+        // Detect indentation from the <source> element
+        const sourceIndentMatch = unitContent.match(/(\n[ \t]*)<source/);
+        const indent = sourceIndentMatch ? sourceIndentMatch[1] : '\n        ';
+        // Try to find existing <target ...>...</target> or <target .../> (self-closing)
+        const targetRegex = /<target\b[^>]*(?:\/>|>[\s\S]*?<\/target>)/;
+        const targetMatch = unitContent.match(targetRegex);
+        let newUnitContent;
+        if (targetMatch) {
+            // Replace existing target element
+            newUnitContent = unitContent.replace(targetRegex, targetXml);
+        }
+        else {
+            // Insert target after </source>
+            newUnitContent = unitContent.replace(/(<\/source>)/, `$1${indent}${targetXml}`);
+        }
+        // Reconstruct full match
+        const newFullMatch = match[1] + newUnitContent + match[3];
+        return (content.substring(0, match.index) +
+            newFullMatch +
+            content.substring(match.index + match[0].length));
     }
     /**
-     * Build target element content with placeholders restored
-     * Converts placeholder markers (e.g., {{PH}}) back to XML elements
+     * Build a <target>...</target> XML string with placeholders restored
      */
-    buildTargetContent(text, placeholders) {
-        // If no placeholders, return simple text node
+    buildTargetXmlString(text, placeholders, options) {
+        const stateAttr = options?.markAsTranslated ? ' state="translated"' : '';
         if (!placeholders || placeholders.length === 0) {
-            return [{ '#text': text }];
+            return `<target${stateAttr}>${this.escapeXml(text)}</target>`;
         }
-        // Create a map of marker -> placeholder for quick lookup
-        const placeholderMap = new Map();
-        for (const ph of placeholders) {
-            placeholderMap.set(ph.marker, ph);
-        }
-        // Build regex to match all placeholder markers
-        // Escape special regex characters in markers
+        // Build content with placeholder XML elements restored
+        const placeholderMap = new Map(placeholders.map(ph => [ph.marker, ph]));
         const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
-        // Split text by placeholders and build content array
-        const result = [];
         const parts = text.split(markerRegex);
+        let innerXml = '';
         for (const part of parts) {
             if (!part) {
                 continue;
             }
-            const placeholder = placeholderMap.get(part);
-            if (placeholder) {
-                // This is a placeholder marker - restore the XML element
-                const element = this.buildPlaceholderElement(placeholder);
-                result.push(element);
+            const ph = placeholderMap.get(part);
+            if (ph) {
+                innerXml += this.buildPlaceholderXmlString(ph);
             }
             else {
-                // This is regular text
-                result.push({ '#text': part });
+                innerXml += this.escapeXml(part);
             }
         }
-        return result;
+        return `<target${stateAttr}>${innerXml}</target>`;
     }
     /**
-     * Build a placeholder XML element from placeholder metadata
+     * Build a self-closing XML element string from placeholder metadata
      */
-    buildPlaceholderElement(placeholder) {
+    buildPlaceholderXmlString(placeholder) {
         const { tagName, attributes } = placeholder;
-        // Convert attributes to fast-xml-parser format
-        const attrObj = {};
-        for (const [key, value] of Object.entries(attributes)) {
-            attrObj[`@_${key}`] = value;
-        }
-        // Self-closing elements like <x/> have attributes but no content
-        // The preserveOrder format uses arrays for element content
-        const element = {
-            [tagName]: [{ ':@': attrObj }],
-        };
-        return element;
+        const attrs = Object.entries(attributes)
+            .map(([key, value]) => `${key}="${this.escapeXmlAttr(value)}"`)
+            .join(' ');
+        return attrs ? `<${tagName} ${attrs}/>` : `<${tagName}/>`;
+    }
+    /**
+     * Escape text content for XML
+     */
+    escapeXml(text) {
+        return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    /**
+     * Escape attribute value for XML
+     */
+    escapeXmlAttr(text) {
+        return text
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
     }
 }
 exports.XliffFormatter = XliffFormatter;
