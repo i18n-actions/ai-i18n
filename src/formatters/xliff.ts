@@ -61,7 +61,8 @@ export class XliffFormatter extends BaseFormatter {
         const targetXml = this.buildTargetXmlString(
           unit.target!,
           unit.metadata.placeholders,
-          options
+          options,
+          unit.source
         );
         const patched = this.patchUnit(content, unit.id, targetXml, unitTag);
         if (patched !== null) {
@@ -144,7 +145,8 @@ export class XliffFormatter extends BaseFormatter {
   private buildTargetXmlString(
     text: string,
     placeholders?: XliffPlaceholder[],
-    options?: FormatOptions
+    options?: FormatOptions,
+    sourceText?: string
   ): string {
     const stateAttr = options?.markAsTranslated ? ' state="translated"' : '';
 
@@ -152,12 +154,18 @@ export class XliffFormatter extends BaseFormatter {
       return `<target${stateAttr}>${this.escapeXml(text)}</target>`;
     }
 
+    // Repair missing whitespace around placeholders before XML reconstruction
+    let repairedText = text;
+    if (sourceText) {
+      repairedText = this.repairPlaceholderSpacing(text, sourceText, placeholders);
+    }
+
     // Build content with placeholder XML elements restored
     const placeholderMap = new Map(placeholders.map(ph => [ph.marker, ph]));
     const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
 
-    const parts = text.split(markerRegex);
+    const parts = repairedText.split(markerRegex);
     let innerXml = '';
 
     for (const part of parts) {
@@ -173,6 +181,47 @@ export class XliffFormatter extends BaseFormatter {
     }
 
     return `<target${stateAttr}>${innerXml}</target>`;
+  }
+
+  /**
+   * Repair missing whitespace around placeholder markers in translated text.
+   * Compares spacing patterns between source and target for each marker,
+   * inserting spaces where the source had them but the translation dropped them.
+   */
+  private repairPlaceholderSpacing(
+    targetText: string,
+    sourceText: string,
+    placeholders: XliffPlaceholder[]
+  ): string {
+    let result = targetText;
+
+    for (const ph of placeholders) {
+      const escaped = ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Check source spacing: character before and after the marker
+      const srcBeforeMatch = new RegExp(`(\\s)${escaped}`).exec(sourceText);
+      const srcAfterMatch = new RegExp(`${escaped}(\\s)`).exec(sourceText);
+      const sourceHasSpaceBefore = srcBeforeMatch !== null;
+      const sourceHasSpaceAfter = srcAfterMatch !== null;
+
+      if (sourceHasSpaceBefore) {
+        // If source has space before marker but target has a non-space char directly before it
+        result = result.replace(
+          new RegExp(`(\\S)${escaped}`, 'g'),
+          `$1 ${ph.marker}`
+        );
+      }
+
+      if (sourceHasSpaceAfter) {
+        // If source has space after marker but target has a non-space char directly after it
+        result = result.replace(
+          new RegExp(`${escaped}(\\S)`, 'g'),
+          `${ph.marker} $1`
+        );
+      }
+    }
+
+    return result;
   }
 
   /**

@@ -246,6 +246,121 @@ describe('XliffFormatter', () => {
     });
   });
 
+  describe('placeholder spacing repair', () => {
+    it('should insert missing spaces around placeholders based on source', () => {
+      const placeholders: XliffPlaceholder[] = [
+        {
+          marker: '{{PH}}',
+          tagName: 'x',
+          attributes: { id: 'PH', 'equiv-text': '{{count}}' },
+        },
+      ];
+
+      const originalUnits: TranslationUnit[] = [
+        {
+          id: 'greeting',
+          source: 'Showing {{PH}} of',
+          hash: hashContent('Showing {{PH}} of'),
+          metadata: { file: 'test.xliff', placeholders },
+        },
+      ];
+
+      const extractResult = makeExtractResult(xliff12Content, originalUnits, 'xliff-1.2');
+
+      // LLM dropped spaces around the placeholder
+      const updatedUnits: TranslationUnit[] = [
+        {
+          id: 'greeting',
+          source: 'Showing {{PH}} of',
+          target: 'Mostrando{{PH}}de',
+          hash: hashContent('Showing {{PH}} of'),
+          metadata: { file: 'test.xliff', placeholders },
+        },
+      ];
+
+      const result = formatter.format(xliff12Content, updatedUnits, extractResult);
+
+      expect(result.content).toContain(
+        '<target>Mostrando <x id="PH" equiv-text="{{count}}"/> de</target>'
+      );
+    });
+
+    it('should not add spaces when source has no spaces around placeholder', () => {
+      const placeholders: XliffPlaceholder[] = [
+        {
+          marker: '{{PH}}',
+          tagName: 'x',
+          attributes: { id: 'PH', 'equiv-text': '{{name}}' },
+        },
+      ];
+
+      const originalUnits: TranslationUnit[] = [
+        {
+          id: 'greeting',
+          source: 'Hello,{{PH}}!',
+          hash: hashContent('Hello,{{PH}}!'),
+          metadata: { file: 'test.xliff', placeholders },
+        },
+      ];
+
+      const extractResult = makeExtractResult(xliff12Content, originalUnits, 'xliff-1.2');
+
+      const updatedUnits: TranslationUnit[] = [
+        {
+          id: 'greeting',
+          source: 'Hello,{{PH}}!',
+          target: 'Hallo,{{PH}}!',
+          hash: hashContent('Hello,{{PH}}!'),
+          metadata: { file: 'test.xliff', placeholders },
+        },
+      ];
+
+      const result = formatter.format(xliff12Content, updatedUnits, extractResult);
+
+      expect(result.content).toContain(
+        '<target>Hallo,<x id="PH" equiv-text="{{name}}"/>!</target>'
+      );
+    });
+
+    it('should preserve existing spaces in translation when source has them', () => {
+      const placeholders: XliffPlaceholder[] = [
+        {
+          marker: '{{PH}}',
+          tagName: 'x',
+          attributes: { id: 'PH', 'equiv-text': '{{count}}' },
+        },
+      ];
+
+      const originalUnits: TranslationUnit[] = [
+        {
+          id: 'greeting',
+          source: 'Showing {{PH}} items',
+          hash: hashContent('Showing {{PH}} items'),
+          metadata: { file: 'test.xliff', placeholders },
+        },
+      ];
+
+      const extractResult = makeExtractResult(xliff12Content, originalUnits, 'xliff-1.2');
+
+      // Translation already has correct spaces
+      const updatedUnits: TranslationUnit[] = [
+        {
+          id: 'greeting',
+          source: 'Showing {{PH}} items',
+          target: 'Mostrando {{PH}} elementos',
+          hash: hashContent('Showing {{PH}} items'),
+          metadata: { file: 'test.xliff', placeholders },
+        },
+      ];
+
+      const result = formatter.format(xliff12Content, updatedUnits, extractResult);
+
+      expect(result.content).toContain(
+        '<target>Mostrando <x id="PH" equiv-text="{{count}}"/> elementos</target>'
+      );
+    });
+  });
+
   describe('diff minimization', () => {
     it('should produce identical output when re-formatting already-translated content', () => {
       const translatedContent = `<?xml version="1.0" encoding="UTF-8"?>
