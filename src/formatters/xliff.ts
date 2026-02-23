@@ -1,4 +1,3 @@
-import { XMLBuilder, XMLParser } from 'fast-xml-parser';
 import { FormatterError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import type {
@@ -8,36 +7,23 @@ import type {
   FormatInfo,
   XliffPlaceholder,
 } from '../types/translation';
-import { BaseFormatter, FormatOptions, mergeUnits, countChanges } from './base';
+import { BaseFormatter, FormatOptions, countChanges } from './base';
 
 /**
  * XLIFF formatter for 1.2 and 2.0 formats
+ *
+ * Uses targeted string replacement instead of full XML rebuild
+ * to preserve original file formatting and minimize diffs.
  */
 export class XliffFormatter extends BaseFormatter {
   readonly supportedFormats: FormatInfo['format'][] = ['xliff-1.2', 'xliff-2.0'];
   readonly fileExtensions = ['.xliff', '.xlf', '.xml'];
 
-  private parser = new XMLParser({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@_',
-    textNodeName: '#text',
-    preserveOrder: true,
-    trimValues: false,
-    parseAttributeValue: false,
-  });
-
-  private builder = new XMLBuilder({
-    ignoreAttributes: false,
-    attributeNamePrefix: '@_',
-    textNodeName: '#text',
-    preserveOrder: true,
-    format: true,
-    indentBy: '  ',
-    suppressEmptyNode: false,
-  });
-
   /**
    * Format XLIFF content with updated translations
+   *
+   * Only modifies <target> elements for units that changed,
+   * preserving the rest of the file byte-for-byte.
    */
   format(
     originalContent: string,
@@ -46,33 +32,45 @@ export class XliffFormatter extends BaseFormatter {
     options?: FormatOptions
   ): FormatResult {
     try {
-      const merged = mergeUnits(extractResult.units, updatedUnits);
       const changes = countChanges(extractResult.units, updatedUnits);
 
-      const updatedWithTargets = updatedUnits.filter(u => u.target).length;
-      const mergedWithTargets = merged.filter(u => u.target).length;
+      // Build map: only units whose target actually changed
+      const originalMap = new Map(extractResult.units.map(u => [u.id, u]));
+      const unitsToUpdate: TranslationUnit[] = [];
+      for (const unit of updatedUnits) {
+        if (!unit.target) {
+          continue;
+        }
+        const original = originalMap.get(unit.id);
+        if (!original || unit.target !== original.target) {
+          unitsToUpdate.push(unit);
+        }
+      }
+
       logger.info(
-        `XLIFF merge stats: input=${updatedUnits.length} (${updatedWithTargets} with targets), ` +
-          `merged=${merged.length} (${mergedWithTargets} with targets)`
+        `XLIFF formatter: ${unitsToUpdate.length} units to patch ` +
+          `(${updatedUnits.length} total, ${changes.updated} changed)`
       );
 
-      // Parse original to preserve structure
-      const parsed = this.parser.parse(originalContent) as unknown[];
+      const unitTag = extractResult.formatInfo.format === 'xliff-2.0' ? 'unit' : 'trans-unit';
 
-      // Update based on format version
-      if (extractResult.formatInfo.format === 'xliff-2.0') {
-        this.updateXliff2(parsed, merged, options);
-      } else {
-        this.updateXliff1(parsed, merged, options);
+      let content = originalContent;
+      let patchedCount = 0;
+
+      for (const unit of unitsToUpdate) {
+        const targetXml = this.buildTargetXmlString(
+          unit.target!,
+          unit.metadata.placeholders,
+          options
+        );
+        const patched = this.patchUnit(content, unit.id, targetXml, unitTag);
+        if (patched !== null) {
+          content = patched;
+          patchedCount++;
+        }
       }
 
-      // Rebuild XML
-      let content = this.builder.build(parsed) as string;
-
-      // Ensure XML declaration
-      if (!content.startsWith('<?xml')) {
-        content = '<?xml version="1.0" encoding="UTF-8"?>\n' + content;
-      }
+      logger.info(`XLIFF formatter: patched ${patchedCount} units in-place`);
 
       return {
         content,
@@ -89,271 +87,120 @@ export class XliffFormatter extends BaseFormatter {
   }
 
   /**
-   * Update XLIFF 1.2 structure with translations
+   * Patch a single trans-unit/unit in the XML string by replacing or inserting its <target>.
+   * Returns the patched string or null if the unit was not found.
    */
-  private updateXliff1(parsed: unknown[], units: TranslationUnit[], options?: FormatOptions): void {
-    const unitMap = new Map(units.map(u => [u.id, u]));
-    const unitsWithTargets = units.filter(u => u.target).length;
-    logger.debug(`XLIFF formatter: ${unitsWithTargets}/${units.length} units have targets`);
+  private patchUnit(
+    content: string,
+    unitId: string,
+    targetXml: string,
+    unitTag: string
+  ): string | null {
+    const escapedId = unitId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-    let foundCount = 0;
-    let updatedCount = 0;
+    // Match the unit block: <trans-unit id="...">...</trans-unit>
+    const unitRegex = new RegExp(
+      `(<${unitTag}\\s[^>]*?id="${escapedId}"[^>]*>)([\\s\\S]*?)(<\\/${unitTag}>)`
+    );
 
-    this.walkNodes(parsed, (node: Record<string, unknown>) => {
-      if ('trans-unit' in node) {
-        foundCount++;
-        const transUnit = node['trans-unit'] as Record<string, unknown>[];
-        if (!Array.isArray(transUnit)) {
-          logger.debug(`trans-unit is not an array`);
-          return;
-        }
+    const match = unitRegex.exec(content);
+    if (!match) {
+      logger.debug(`Unit ${unitId} not found in XML content`);
+      return null;
+    }
 
-        // In preserveOrder mode, attributes are siblings of the element key, not children
-        // Structure: { "trans-unit": [...], ":@": { "@_id": "123" } }
-        const attrsObj = node[':@'] as Record<string, unknown> | undefined;
-        const id = attrsObj?.['@_id'] as string | undefined;
-        if (!id) {
-          logger.debug(`No @_id found for trans-unit`);
-          return;
-        }
+    const unitContent = match[2];
 
-        const unit = unitMap.get(id);
-        if (!unit) {
-          logger.debug(`Unit ${id} not found in unitMap`);
-          return;
-        }
-        if (!unit.target) {
-          return;
-        }
+    // Detect indentation from the <source> element
+    const sourceIndentMatch = unitContent.match(/(\n[ \t]*)<source/);
+    const indent = sourceIndentMatch ? sourceIndentMatch[1] : '\n        ';
 
-        updatedCount++;
+    // Try to find existing <target ...>...</target> or <target .../> (self-closing)
+    const targetRegex = /<target\b[^>]*(?:\/>|>[\s\S]*?<\/target>)/;
+    const targetMatch = unitContent.match(targetRegex);
 
-        // Find or create target element
-        const targetIndex = transUnit.findIndex(
-          (item): item is Record<string, unknown> =>
-            typeof item === 'object' && item !== null && 'target' in item
-        );
+    let newUnitContent: string;
 
-        // Build target content with placeholders restored
-        const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
+    if (targetMatch) {
+      // Replace existing target element
+      newUnitContent = unitContent.replace(targetRegex, targetXml);
+    } else {
+      // Insert target after </source>
+      newUnitContent = unitContent.replace(/(<\/source>)/, `$1${indent}${targetXml}`);
+    }
 
-        if (targetIndex === -1) {
-          // Insert target after source
-          const sourceIndex = transUnit.findIndex(
-            (item): item is Record<string, unknown> =>
-              typeof item === 'object' && item !== null && 'source' in item
-          );
-
-          if (sourceIndex !== -1) {
-            const targetNode: Record<string, unknown> = {
-              target: targetContent,
-            };
-
-            if (options?.markAsTranslated) {
-              targetNode[':@'] = { '@_state': 'translated' };
-            }
-
-            transUnit.splice(sourceIndex + 1, 0, targetNode);
-          }
-        } else {
-          // Update existing target
-          const targetNode = transUnit[targetIndex];
-          targetNode['target'] = targetContent;
-
-          if (options?.markAsTranslated) {
-            if (!targetNode[':@']) {
-              targetNode[':@'] = {};
-            }
-            (targetNode[':@'] as Record<string, unknown>)['@_state'] = 'translated';
-          }
-        }
-      }
-    });
-
-    logger.info(
-      `XLIFF formatter: found ${foundCount} trans-units in XML, updated ${updatedCount} with translations`
+    // Reconstruct full match
+    const newFullMatch = match[1] + newUnitContent + match[3];
+    return (
+      content.substring(0, match.index) +
+      newFullMatch +
+      content.substring(match.index + match[0].length)
     );
   }
 
   /**
-   * Update XLIFF 2.0 structure with translations
+   * Build a <target>...</target> XML string with placeholders restored
    */
-  private updateXliff2(parsed: unknown[], units: TranslationUnit[], options?: FormatOptions): void {
-    const unitMap = new Map(units.map(u => [u.id, u]));
-
-    this.walkNodes(parsed, (node: Record<string, unknown>) => {
-      if ('unit' in node) {
-        const unitNode = node['unit'] as Record<string, unknown>[];
-        if (!Array.isArray(unitNode)) {
-          return;
-        }
-
-        // Find unit attributes
-        const attrs = unitNode.find(
-          (item): item is Record<string, unknown> =>
-            typeof item === 'object' && item !== null && ':@' in item
-        );
-
-        if (!attrs) {
-          return;
-        }
-
-        const attrsObj = attrs[':@'] as Record<string, unknown>;
-        const id = attrsObj?.['@_id'] as string | undefined;
-        if (!id) {
-          return;
-        }
-
-        const unit = unitMap.get(id);
-        if (!unit?.target) {
-          return;
-        }
-
-        // Find segment element
-        const segmentIndex = unitNode.findIndex(
-          (item): item is Record<string, unknown> =>
-            typeof item === 'object' && item !== null && 'segment' in item
-        );
-
-        if (segmentIndex === -1) {
-          return;
-        }
-
-        const segmentWrapper = unitNode[segmentIndex];
-        const segment = segmentWrapper['segment'] as Record<string, unknown>[];
-        if (!Array.isArray(segment)) {
-          return;
-        }
-
-        // Build target content with placeholders restored
-        const targetContent = this.buildTargetContent(unit.target, unit.metadata.placeholders);
-
-        // Find or create target in segment
-        const targetIndex = segment.findIndex(
-          (item): item is Record<string, unknown> =>
-            typeof item === 'object' && item !== null && 'target' in item
-        );
-
-        if (targetIndex === -1) {
-          // Insert target after source
-          const sourceIndex = segment.findIndex(
-            (item): item is Record<string, unknown> =>
-              typeof item === 'object' && item !== null && 'source' in item
-          );
-
-          if (sourceIndex !== -1) {
-            segment.splice(sourceIndex + 1, 0, {
-              target: targetContent,
-            });
-          }
-        } else {
-          // Update existing target
-          segment[targetIndex]['target'] = targetContent;
-        }
-
-        // Update segment state if requested
-        if (options?.markAsTranslated) {
-          const segmentAttrs = segment.find(
-            (item): item is Record<string, unknown> =>
-              typeof item === 'object' && item !== null && ':@' in item
-          );
-
-          if (segmentAttrs) {
-            (segmentAttrs[':@'] as Record<string, unknown>)['@_state'] = 'translated';
-          } else {
-            segment.unshift({ ':@': { '@_state': 'translated' } });
-          }
-        }
-      }
-    });
-  }
-
-  /**
-   * Walk all nodes in parsed XML structure
-   */
-  private walkNodes(nodes: unknown[], callback: (node: Record<string, unknown>) => void): void {
-    for (const node of nodes) {
-      if (typeof node !== 'object' || node === null) {
-        continue;
-      }
-
-      const nodeObj = node as Record<string, unknown>;
-      callback(nodeObj);
-
-      // Recurse into child arrays
-      for (const value of Object.values(nodeObj)) {
-        if (Array.isArray(value)) {
-          this.walkNodes(value, callback);
-        }
-      }
-    }
-  }
-
-  /**
-   * Build target element content with placeholders restored
-   * Converts placeholder markers (e.g., {{PH}}) back to XML elements
-   */
-  private buildTargetContent(
+  private buildTargetXmlString(
     text: string,
-    placeholders?: XliffPlaceholder[]
-  ): Array<Record<string, unknown>> {
-    // If no placeholders, return simple text node
+    placeholders?: XliffPlaceholder[],
+    options?: FormatOptions
+  ): string {
+    const stateAttr = options?.markAsTranslated ? ' state="translated"' : '';
+
     if (!placeholders || placeholders.length === 0) {
-      return [{ '#text': text }];
+      return `<target${stateAttr}>${this.escapeXml(text)}</target>`;
     }
 
-    // Create a map of marker -> placeholder for quick lookup
-    const placeholderMap = new Map<string, XliffPlaceholder>();
-    for (const ph of placeholders) {
-      placeholderMap.set(ph.marker, ph);
-    }
-
-    // Build regex to match all placeholder markers
-    // Escape special regex characters in markers
+    // Build content with placeholder XML elements restored
+    const placeholderMap = new Map(placeholders.map(ph => [ph.marker, ph]));
     const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
     const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
 
-    // Split text by placeholders and build content array
-    const result: Array<Record<string, unknown>> = [];
     const parts = text.split(markerRegex);
+    let innerXml = '';
 
     for (const part of parts) {
       if (!part) {
         continue;
       }
-
-      const placeholder = placeholderMap.get(part);
-      if (placeholder) {
-        // This is a placeholder marker - restore the XML element
-        const element = this.buildPlaceholderElement(placeholder);
-        result.push(element);
+      const ph = placeholderMap.get(part);
+      if (ph) {
+        innerXml += this.buildPlaceholderXmlString(ph);
       } else {
-        // This is regular text
-        result.push({ '#text': part });
+        innerXml += this.escapeXml(part);
       }
     }
 
-    return result;
+    return `<target${stateAttr}>${innerXml}</target>`;
   }
 
   /**
-   * Build a placeholder XML element from placeholder metadata
+   * Build a self-closing XML element string from placeholder metadata
    */
-  private buildPlaceholderElement(placeholder: XliffPlaceholder): Record<string, unknown> {
+  private buildPlaceholderXmlString(placeholder: XliffPlaceholder): string {
     const { tagName, attributes } = placeholder;
+    const attrs = Object.entries(attributes)
+      .map(([key, value]) => `${key}="${this.escapeXmlAttr(value)}"`)
+      .join(' ');
+    return attrs ? `<${tagName} ${attrs}/>` : `<${tagName}/>`;
+  }
 
-    // Convert attributes to fast-xml-parser format
-    const attrObj: Record<string, string> = {};
-    for (const [key, value] of Object.entries(attributes)) {
-      attrObj[`@_${key}`] = value;
-    }
+  /**
+   * Escape text content for XML
+   */
+  private escapeXml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
 
-    // Self-closing elements like <x/> have attributes but no content
-    // The preserveOrder format uses arrays for element content
-    const element: Record<string, unknown> = {
-      [tagName]: [{ ':@': attrObj }],
-    };
-
-    return element;
+  /**
+   * Escape attribute value for XML
+   */
+  private escapeXmlAttr(text: string): string {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 }

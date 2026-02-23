@@ -2,36 +2,40 @@ import type { ExtractResult, FormatResult, TranslationUnit, FormatInfo } from '.
 import { BaseFormatter, FormatOptions } from './base';
 /**
  * XLIFF formatter for 1.2 and 2.0 formats
+ *
+ * Uses targeted string replacement instead of full XML rebuild
+ * to preserve original file formatting and minimize diffs.
  */
 export declare class XliffFormatter extends BaseFormatter {
     readonly supportedFormats: FormatInfo['format'][];
     readonly fileExtensions: string[];
-    private parser;
-    private builder;
     /**
      * Format XLIFF content with updated translations
+     *
+     * Only modifies <target> elements for units that changed,
+     * preserving the rest of the file byte-for-byte.
      */
     format(originalContent: string, updatedUnits: TranslationUnit[], extractResult: ExtractResult, options?: FormatOptions): FormatResult;
     /**
-     * Update XLIFF 1.2 structure with translations
+     * Patch a single trans-unit/unit in the XML string by replacing or inserting its <target>.
+     * Returns the patched string or null if the unit was not found.
      */
-    private updateXliff1;
+    private patchUnit;
     /**
-     * Update XLIFF 2.0 structure with translations
+     * Build a <target>...</target> XML string with placeholders restored
      */
-    private updateXliff2;
+    private buildTargetXmlString;
     /**
-     * Walk all nodes in parsed XML structure
+     * Build a self-closing XML element string from placeholder metadata
      */
-    private walkNodes;
+    private buildPlaceholderXmlString;
     /**
-     * Build target element content with placeholders restored
-     * Converts placeholder markers (e.g., {{PH}}) back to XML elements
+     * Escape text content for XML
      */
-    private buildTargetContent;
+    private escapeXml;
     /**
-     * Build a placeholder XML element from placeholder metadata
+     * Escape attribute value for XML
      */
-    private buildPlaceholderElement;
+    private escapeXmlAttr;
 }
 //# sourceMappingURL=xliff.d.ts.map
