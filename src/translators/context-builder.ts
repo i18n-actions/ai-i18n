@@ -66,7 +66,8 @@ CRITICAL RULES:
    - HTML tags like <b>, </b>, <br/>
    - ICU format elements like {count, plural, ...}
    - Do NOT translate placeholder names or content inside {{...}}
-   - The double-brace placeholders represent UI variables - keep them EXACTLY as-is`;
+   - The double-brace placeholders represent UI variables - keep them EXACTLY as-is
+   - CRITICAL: Preserve whitespace around placeholders. If the source has a space before or after a placeholder, the translation MUST also have a space in the same position. For example: "Showing {{PH}} of" must NOT become "Showing{{PH}}of" or "{{PH}}Mostrando de"`;
   }
 
   if (opts.preserveFormatting) {
@@ -258,6 +259,24 @@ export function validateTranslation(
     for (const placeholder of translationPlaceholders) {
       if (!sourcePlaceholders.has(placeholder)) {
         issues.push(`Unexpected placeholder: ${placeholder}`);
+      }
+    }
+
+    // Check for missing whitespace around placeholders
+    for (const placeholder of sourcePlaceholders) {
+      if (!translationPlaceholders.has(placeholder)) {
+        continue; // Already flagged as missing
+      }
+      const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const srcMatch = new RegExp(`(.)${escaped}(.)`, 's').exec(source);
+      const tgtMatch = new RegExp(`(.)${escaped}(.)`, 's').exec(translation);
+      if (srcMatch && tgtMatch) {
+        if (/\s/.test(srcMatch[1]) && !/\s/.test(tgtMatch[1])) {
+          issues.push(`Missing space before placeholder: ${placeholder}`);
+        }
+        if (/\s/.test(srcMatch[2]) && !/\s/.test(tgtMatch[2])) {
+          issues.push(`Missing space after placeholder: ${placeholder}`);
+        }
       }
     }
   }
