@@ -50408,7 +50408,7 @@ class XliffFormatter extends base_1.BaseFormatter {
             let content = originalContent;
             let patchedCount = 0;
             for (const unit of unitsToUpdate) {
-                const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options);
+                const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options, unit.source);
                 const patched = this.patchUnit(content, unit.id, targetXml, unitTag);
                 if (patched !== null) {
                     content = patched;
@@ -50464,16 +50464,21 @@ class XliffFormatter extends base_1.BaseFormatter {
     /**
      * Build a <target>...</target> XML string with placeholders restored
      */
-    buildTargetXmlString(text, placeholders, options) {
+    buildTargetXmlString(text, placeholders, options, sourceText) {
         const stateAttr = options?.markAsTranslated ? ' state="translated"' : '';
         if (!placeholders || placeholders.length === 0) {
             return `<target${stateAttr}>${this.escapeXml(text)}</target>`;
+        }
+        // Repair missing whitespace around placeholders before XML reconstruction
+        let repairedText = text;
+        if (sourceText) {
+            repairedText = this.repairPlaceholderSpacing(text, sourceText, placeholders);
         }
         // Build content with placeholder XML elements restored
         const placeholderMap = new Map(placeholders.map(ph => [ph.marker, ph]));
         const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
         const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
-        const parts = text.split(markerRegex);
+        const parts = repairedText.split(markerRegex);
         let innerXml = '';
         for (const part of parts) {
             if (!part) {
@@ -50488,6 +50493,31 @@ class XliffFormatter extends base_1.BaseFormatter {
             }
         }
         return `<target${stateAttr}>${innerXml}</target>`;
+    }
+    /**
+     * Repair missing whitespace around placeholder markers in translated text.
+     * Compares spacing patterns between source and target for each marker,
+     * inserting spaces where the source had them but the translation dropped them.
+     */
+    repairPlaceholderSpacing(targetText, sourceText, placeholders) {
+        let result = targetText;
+        for (const ph of placeholders) {
+            const escaped = ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Check source spacing: character before and after the marker
+            const srcBeforeMatch = new RegExp(`(\\s)${escaped}`).exec(sourceText);
+            const srcAfterMatch = new RegExp(`${escaped}(\\s)`).exec(sourceText);
+            const sourceHasSpaceBefore = srcBeforeMatch !== null;
+            const sourceHasSpaceAfter = srcAfterMatch !== null;
+            if (sourceHasSpaceBefore) {
+                // If source has space before marker but target has a non-space char directly before it
+                result = result.replace(new RegExp(`(\\S)${escaped}`, 'g'), `$1 ${ph.marker}`);
+            }
+            if (sourceHasSpaceAfter) {
+                // If source has space after marker but target has a non-space char directly after it
+                result = result.replace(new RegExp(`${escaped}(\\S)`, 'g'), `${ph.marker} $1`);
+            }
+        }
+        return result;
     }
     /**
      * Build a self-closing XML element string from placeholder metadata
@@ -52852,7 +52882,8 @@ CRITICAL RULES:
    - HTML tags like <b>, </b>, <br/>
    - ICU format elements like {count, plural, ...}
    - Do NOT translate placeholder names or content inside {{...}}
-   - The double-brace placeholders represent UI variables - keep them EXACTLY as-is`;
+   - The double-brace placeholders represent UI variables - keep them EXACTLY as-is
+   - CRITICAL: Preserve whitespace around placeholders. If the source has a space before or after a placeholder, the translation MUST also have a space in the same position. For example: "Showing {{PH}} of" must NOT become "Showing{{PH}}of" or "{{PH}}Mostrando de"`;
     }
     if (opts.preserveFormatting) {
         prompt += `
@@ -52998,6 +53029,23 @@ function validateTranslation(source, translation, options) {
         for (const placeholder of translationPlaceholders) {
             if (!sourcePlaceholders.has(placeholder)) {
                 issues.push(`Unexpected placeholder: ${placeholder}`);
+            }
+        }
+        // Check for missing whitespace around placeholders
+        for (const placeholder of sourcePlaceholders) {
+            if (!translationPlaceholders.has(placeholder)) {
+                continue; // Already flagged as missing
+            }
+            const escaped = placeholder.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const srcMatch = new RegExp(`(.)${escaped}(.)`, 's').exec(source);
+            const tgtMatch = new RegExp(`(.)${escaped}(.)`, 's').exec(translation);
+            if (srcMatch && tgtMatch) {
+                if (/\s/.test(srcMatch[1]) && !/\s/.test(tgtMatch[1])) {
+                    issues.push(`Missing space before placeholder: ${placeholder}`);
+                }
+                if (/\s/.test(srcMatch[2]) && !/\s/.test(tgtMatch[2])) {
+                    issues.push(`Missing space after placeholder: ${placeholder}`);
+                }
             }
         }
     }

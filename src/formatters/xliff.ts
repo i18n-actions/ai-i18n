@@ -206,18 +206,12 @@ export class XliffFormatter extends BaseFormatter {
 
       if (sourceHasSpaceBefore) {
         // If source has space before marker but target has a non-space char directly before it
-        result = result.replace(
-          new RegExp(`(\\S)${escaped}`, 'g'),
-          `$1 ${ph.marker}`
-        );
+        result = result.replace(new RegExp(`(\\S)${escaped}`, 'g'), `$1 ${ph.marker}`);
       }
 
       if (sourceHasSpaceAfter) {
         // If source has space after marker but target has a non-space char directly after it
-        result = result.replace(
-          new RegExp(`${escaped}(\\S)`, 'g'),
-          `${ph.marker} $1`
-        );
+        result = result.replace(new RegExp(`${escaped}(\\S)`, 'g'), `${ph.marker} $1`);
       }
     }
 

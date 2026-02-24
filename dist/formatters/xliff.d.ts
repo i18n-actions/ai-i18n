@@ -26,6 +26,12 @@ export declare class XliffFormatter extends BaseFormatter {
      */
     private buildTargetXmlString;
     /**
+     * Repair missing whitespace around placeholder markers in translated text.
+     * Compares spacing patterns between source and target for each marker,
+     * inserting spaces where the source had them but the translation dropped them.
+     */
+    private repairPlaceholderSpacing;
+    /**
      * Build a self-closing XML element string from placeholder metadata
      */
     private buildPlaceholderXmlString;
