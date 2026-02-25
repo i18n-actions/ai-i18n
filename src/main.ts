@@ -127,6 +127,10 @@ async function runPipeline(
   // Validate translator
   await orchestrator.validate();
 
+  // Snapshot hash store before processing — all languages should diff against
+  // the same baseline, not see updates from earlier languages
+  const hashStoreSnapshot = JSON.parse(JSON.stringify(hashStore)) as typeof hashStore;
+
   // Process each target language
   for (const targetLanguage of config.files.targetLanguages) {
     logger.group(`Translating to ${targetLanguage}`);
@@ -136,6 +140,7 @@ async function runPipeline(
         config,
         targetLanguage,
         orchestrator,
+        hashStoreSnapshot,
         hashStore,
         reportBuilder
       );
@@ -175,7 +180,8 @@ async function processLanguage(
   config: ActionConfig,
   targetLanguage: string,
   orchestrator: ReturnType<typeof createOrchestrator>,
-  hashStore: ReturnType<typeof createHashStore>,
+  diffHashStore: ReturnType<typeof createHashStore>,
+  updateHashStore: ReturnType<typeof createHashStore>,
   reportBuilder: ReportBuilder
 ): Promise<string[]> {
   const updatedFiles: string[] = [];
@@ -201,7 +207,8 @@ async function processLanguage(
         extractResult,
         targetLanguage,
         orchestrator,
-        hashStore,
+        diffHashStore,
+        updateHashStore,
         reportBuilder
       );
 
@@ -232,7 +239,8 @@ async function processFile(
   extractResult: ExtractResult,
   targetLanguage: string,
   orchestrator: ReturnType<typeof createOrchestrator>,
-  hashStore: ReturnType<typeof createHashStore>,
+  diffHashStore: ReturnType<typeof createHashStore>,
+  updateHashStore: ReturnType<typeof createHashStore>,
   reportBuilder: ReportBuilder
 ): Promise<string | null> {
   logger.info(`Processing ${extractResult.filePath}`);
@@ -247,7 +255,7 @@ async function processFile(
   // Diff against hash store to find changes
   // Use relative path for portable hash store keys
   const relativeFilePath = toRelativePath(extractResult.filePath);
-  const diffResult = diffAgainstStore(relativeFilePath, extractResult.units, hashStore);
+  const diffResult = diffAgainstStore(relativeFilePath, extractResult.units, diffHashStore);
 
   // Get units that need translation
   const unitsToTranslate = getUnitsNeedingTranslation(diffResult);
@@ -339,7 +347,7 @@ async function processFile(
     // Update hash store only for units that successfully got translations
     const successfullyTranslatedUnits = updatedUnits.filter(u => u.target);
     if (successfullyTranslatedUnits.length > 0) {
-      addToHashStore(hashStore, relativeFilePath, successfullyTranslatedUnits);
+      addToHashStore(updateHashStore, relativeFilePath, successfullyTranslatedUnits);
       logger.info(
         `Updated hash store with ${successfullyTranslatedUnits.length}/${extractResult.units.length} translated units`
       );
