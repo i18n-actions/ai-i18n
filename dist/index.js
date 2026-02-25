@@ -49924,6 +49924,13 @@ function countChanges(originalUnits, updatedUnits) {
             unchanged++;
         }
     }
+    // Count new units: present in updatedUnits with a target but not in originalUnits
+    const originalIds = new Set(originalUnits.map(u => u.id));
+    for (const unit of updatedUnits) {
+        if (unit.target && !originalIds.has(unit.id)) {
+            updated++;
+        }
+    }
     return { updated, unchanged };
 }
 
@@ -50407,6 +50414,7 @@ class XliffFormatter extends base_1.BaseFormatter {
             const unitTag = extractResult.formatInfo.format === 'xliff-2.0' ? 'unit' : 'trans-unit';
             let content = originalContent;
             let patchedCount = 0;
+            const missedUnits = [];
             for (const unit of unitsToUpdate) {
                 const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options, unit.source);
                 const patched = this.patchUnit(content, unit.id, targetXml, unitTag);
@@ -50414,6 +50422,15 @@ class XliffFormatter extends base_1.BaseFormatter {
                     content = patched;
                     patchedCount++;
                 }
+                else {
+                    missedUnits.push(unit);
+                }
+            }
+            // Insert new trans-units that don't exist in the target file yet
+            if (missedUnits.length > 0) {
+                logger_1.logger.info(`XLIFF formatter: inserting ${missedUnits.length} new units`);
+                content = this.insertNewUnits(content, missedUnits, unitTag, options);
+                patchedCount += missedUnits.length;
             }
             logger_1.logger.info(`XLIFF formatter: patched ${patchedCount} units in-place`);
             return {
@@ -50460,6 +50477,74 @@ class XliffFormatter extends base_1.BaseFormatter {
         return (content.substring(0, match.index) +
             newFullMatch +
             content.substring(match.index + match[0].length));
+    }
+    /**
+     * Insert new trans-unit/unit elements that don't exist in the target file.
+     * Appends them before the closing </body> (XLIFF 1.2) or </file> (XLIFF 2.0) tag.
+     */
+    insertNewUnits(content, units, unitTag, options) {
+        // Detect indentation from existing units
+        const existingUnitMatch = content.match(new RegExp(`([ \t]*)<${unitTag}\\s`));
+        const unitIndent = existingUnitMatch ? existingUnitMatch[1] : '      ';
+        const childIndent = unitIndent + '  ';
+        // Build XML for each new unit
+        const newBlocks = [];
+        for (const unit of units) {
+            const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options, unit.source);
+            const sourceXml = `<source>${this.buildSourceXmlString(unit.source, unit.metadata.placeholders)}</source>`;
+            if (unitTag === 'unit') {
+                // XLIFF 2.0: <unit id="..."><segment><source>...</source><target>...</target></segment></unit>
+                newBlocks.push(`${unitIndent}<${unitTag} id="${this.escapeXmlAttr(unit.id)}">\n` +
+                    `${childIndent}<segment>\n` +
+                    `${childIndent}  ${sourceXml}\n` +
+                    `${childIndent}  ${targetXml}\n` +
+                    `${childIndent}</segment>\n` +
+                    `${unitIndent}</${unitTag}>`);
+            }
+            else {
+                // XLIFF 1.2: <trans-unit id="..."><source>...</source><target>...</target></trans-unit>
+                newBlocks.push(`${unitIndent}<${unitTag} id="${this.escapeXmlAttr(unit.id)}" datatype="html">\n` +
+                    `${childIndent}${sourceXml}\n` +
+                    `${childIndent}${targetXml}\n` +
+                    `${unitIndent}</${unitTag}>`);
+            }
+        }
+        const insertionXml = newBlocks.join('\n');
+        // Find insertion point: before </body> (1.2) or before the last </file> (2.0)
+        const closingTag = unitTag === 'unit' ? '</file>' : '</body>';
+        const closingIdx = content.lastIndexOf(closingTag);
+        if (closingIdx === -1) {
+            logger_1.logger.warning(`Could not find ${closingTag} to insert new units`);
+            return content;
+        }
+        // Insert before the closing tag, with a newline
+        return content.substring(0, closingIdx) + insertionXml + '\n' + content.substring(closingIdx);
+    }
+    /**
+     * Build source XML content string, restoring placeholders
+     */
+    buildSourceXmlString(text, placeholders) {
+        if (!placeholders || placeholders.length === 0) {
+            return this.escapeXml(text);
+        }
+        const placeholderMap = new Map(placeholders.map(ph => [ph.marker, ph]));
+        const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
+        const parts = text.split(markerRegex);
+        let innerXml = '';
+        for (const part of parts) {
+            if (!part) {
+                continue;
+            }
+            const ph = placeholderMap.get(part);
+            if (ph) {
+                innerXml += this.buildPlaceholderXmlString(ph);
+            }
+            else {
+                innerXml += this.escapeXml(part);
+            }
+        }
+        return innerXml;
     }
     /**
      * Build a <target>...</target> XML string with placeholders restored
@@ -51890,11 +51975,14 @@ async function runPipeline(config, reportBuilder) {
     });
     // Validate translator
     await orchestrator.validate();
+    // Snapshot hash store before processing — all languages should diff against
+    // the same baseline, not see updates from earlier languages
+    const hashStoreSnapshot = JSON.parse(JSON.stringify(hashStore));
     // Process each target language
     for (const targetLanguage of config.files.targetLanguages) {
         logger_1.logger.group(`Translating to ${targetLanguage}`);
         try {
-            const files = await processLanguage(config, targetLanguage, orchestrator, hashStore, reportBuilder);
+            const files = await processLanguage(config, targetLanguage, orchestrator, hashStoreSnapshot, hashStore, reportBuilder);
             updatedFiles.push(...files);
         }
         catch (error) {
@@ -51917,7 +52005,7 @@ async function runPipeline(config, reportBuilder) {
 /**
  * Process a single target language
  */
-async function processLanguage(config, targetLanguage, orchestrator, hashStore, reportBuilder) {
+async function processLanguage(config, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder) {
     const updatedFiles = [];
     // Extract translation units from files
     const extractResults = await (0, factory_1.extractFromPattern)(config.files.pattern, targetLanguage, {
@@ -51932,7 +52020,7 @@ async function processLanguage(config, targetLanguage, orchestrator, hashStore, 
     // Process each file
     for (const extractResult of extractResults) {
         try {
-            const outputFilePath = await processFile(config, extractResult, targetLanguage, orchestrator, hashStore, reportBuilder);
+            const outputFilePath = await processFile(config, extractResult, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder);
             if (outputFilePath) {
                 updatedFiles.push(outputFilePath);
             }
@@ -51947,14 +52035,14 @@ async function processLanguage(config, targetLanguage, orchestrator, hashStore, 
 /**
  * Process a single file
  */
-async function processFile(config, extractResult, targetLanguage, orchestrator, hashStore, reportBuilder) {
+async function processFile(config, extractResult, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder) {
     logger_1.logger.info(`Processing ${extractResult.filePath}`);
     // Generate the language-specific output file path
     const outputFilePath = (0, output_path_1.getOutputFilePath)(extractResult.filePath, targetLanguage, config.files.sourceLanguage);
     // Diff against hash store to find changes
     // Use relative path for portable hash store keys
     const relativeFilePath = toRelativePath(extractResult.filePath);
-    const diffResult = (0, differ_1.diffAgainstStore)(relativeFilePath, extractResult.units, hashStore);
+    const diffResult = (0, differ_1.diffAgainstStore)(relativeFilePath, extractResult.units, diffHashStore);
     // Get units that need translation
     const unitsToTranslate = (0, differ_1.getUnitsNeedingTranslation)(diffResult);
     if (unitsToTranslate.length === 0) {
@@ -52018,7 +52106,7 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
         // Update hash store only for units that successfully got translations
         const successfullyTranslatedUnits = updatedUnits.filter(u => u.target);
         if (successfullyTranslatedUnits.length > 0) {
-            (0, hasher_1.addToHashStore)(hashStore, relativeFilePath, successfullyTranslatedUnits);
+            (0, hasher_1.addToHashStore)(updateHashStore, relativeFilePath, successfullyTranslatedUnits);
             logger_1.logger.info(`Updated hash store with ${successfullyTranslatedUnits.length}/${extractResult.units.length} translated units`);
         }
     }
