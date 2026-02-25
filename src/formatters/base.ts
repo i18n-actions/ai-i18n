@@ -156,5 +156,13 @@ export function countChanges(
     }
   }
 
+  // Count new units: present in updatedUnits with a target but not in originalUnits
+  const originalIds = new Set(originalUnits.map(u => u.id));
+  for (const unit of updatedUnits) {
+    if (unit.target && !originalIds.has(unit.id)) {
+      updated++;
+    }
+  }
+
   return { updated, unchanged };
 }

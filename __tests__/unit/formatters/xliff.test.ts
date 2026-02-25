@@ -361,6 +361,121 @@ describe('XliffFormatter', () => {
     });
   });
 
+  describe('new unit insertion (XLIFF 1.2)', () => {
+    it('should insert a new trans-unit that does not exist in the target file', () => {
+      // Target file only has "greeting" and "welcome"
+      const existingContent = `<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en" target-language="de" datatype="plaintext" original="messages">
+    <body>
+      <trans-unit id="greeting">
+        <source>Hello, World!</source>
+        <target>Hallo, Welt!</target>
+      </trans-unit>
+      <trans-unit id="welcome">
+        <source>Welcome to our application</source>
+        <target>Willkommen in unserer Anwendung</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>`;
+
+      // extractResult reflects what's currently in the target file
+      const originalUnits = [
+        makeUnit('greeting', 'Hello, World!', 'Hallo, Welt!'),
+        makeUnit('welcome', 'Welcome to our application', 'Willkommen in unserer Anwendung'),
+      ];
+      const extractResult = makeExtractResult(existingContent, originalUnits, 'xliff-1.2');
+
+      // updatedUnits includes a brand-new unit "button.save" not in the target
+      const updatedUnits = [
+        makeUnit('greeting', 'Hello, World!', 'Hallo, Welt!'),
+        makeUnit('welcome', 'Welcome to our application', 'Willkommen in unserer Anwendung'),
+        makeUnit('button.save', 'Save changes', 'Änderungen speichern'),
+      ];
+
+      const result = formatter.format(existingContent, updatedUnits, extractResult);
+
+      // New unit should be inserted
+      expect(result.content).toContain('Änderungen speichern');
+      expect(result.content).toContain('id="button.save"');
+      expect(result.content).toContain('<source>Save changes</source>');
+      expect(result.content).toContain('<target>Änderungen speichern</target>');
+      // Existing units should be unchanged
+      expect(result.content).toContain('<target>Hallo, Welt!</target>');
+      expect(result.content).toContain('<target>Willkommen in unserer Anwendung</target>');
+      // Should still be valid XML structure
+      expect(result.content).toContain('</body>');
+      expect(result.content).toContain('</xliff>');
+      // Count should reflect the new unit
+      expect(result.updatedCount).toBe(1);
+    });
+
+    it('should insert multiple new trans-units', () => {
+      const existingContent = `<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en" target-language="de" datatype="plaintext" original="messages">
+    <body>
+      <trans-unit id="greeting">
+        <source>Hello, World!</source>
+        <target>Hallo, Welt!</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>`;
+
+      const originalUnits = [makeUnit('greeting', 'Hello, World!', 'Hallo, Welt!')];
+      const extractResult = makeExtractResult(existingContent, originalUnits, 'xliff-1.2');
+
+      const updatedUnits = [
+        makeUnit('greeting', 'Hello, World!', 'Hallo, Welt!'),
+        makeUnit('new.one', 'First new', 'Erste neue'),
+        makeUnit('new.two', 'Second new', 'Zweite neue'),
+      ];
+
+      const result = formatter.format(existingContent, updatedUnits, extractResult);
+
+      expect(result.content).toContain('id="new.one"');
+      expect(result.content).toContain('id="new.two"');
+      expect(result.content).toContain('<target>Erste neue</target>');
+      expect(result.content).toContain('<target>Zweite neue</target>');
+      expect(result.updatedCount).toBe(2);
+    });
+  });
+
+  describe('new unit insertion (XLIFF 2.0)', () => {
+    it('should insert a new unit that does not exist in the target file', () => {
+      const existingContent = `<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="2.0" srcLang="en" trgLang="fr" xmlns="urn:oasis:names:tc:xliff:document:2.0">
+  <file id="messages">
+    <unit id="greeting">
+      <segment>
+        <source>Hello, World!</source>
+        <target>Bonjour, le monde!</target>
+      </segment>
+    </unit>
+  </file>
+</xliff>`;
+
+      const originalUnits = [makeUnit('greeting', 'Hello, World!', 'Bonjour, le monde!')];
+      const extractResult = makeExtractResult(existingContent, originalUnits, 'xliff-2.0');
+
+      const updatedUnits = [
+        makeUnit('greeting', 'Hello, World!', 'Bonjour, le monde!'),
+        makeUnit('farewell', 'Goodbye', 'Au revoir'),
+      ];
+
+      const result = formatter.format(existingContent, updatedUnits, extractResult);
+
+      expect(result.content).toContain('id="farewell"');
+      expect(result.content).toContain('<source>Goodbye</source>');
+      expect(result.content).toContain('<target>Au revoir</target>');
+      expect(result.content).toContain('<segment>');
+      expect(result.content).toContain('</file>');
+      expect(result.updatedCount).toBe(1);
+    });
+  });
+
   describe('diff minimization', () => {
     it('should produce identical output when re-formatting already-translated content', () => {
       const translatedContent = `<?xml version="1.0" encoding="UTF-8"?>

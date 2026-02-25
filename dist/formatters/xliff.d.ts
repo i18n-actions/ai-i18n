@@ -22,6 +22,15 @@ export declare class XliffFormatter extends BaseFormatter {
      */
     private patchUnit;
     /**
+     * Insert new trans-unit/unit elements that don't exist in the target file.
+     * Appends them before the closing </body> (XLIFF 1.2) or </file> (XLIFF 2.0) tag.
+     */
+    private insertNewUnits;
+    /**
+     * Build source XML content string, restoring placeholders
+     */
+    private buildSourceXmlString;
+    /**
      * Build a <target>...</target> XML string with placeholders restored
      */
     private buildTargetXmlString;

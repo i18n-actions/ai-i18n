@@ -49924,6 +49924,13 @@ function countChanges(originalUnits, updatedUnits) {
             unchanged++;
         }
     }
+    // Count new units: present in updatedUnits with a target but not in originalUnits
+    const originalIds = new Set(originalUnits.map(u => u.id));
+    for (const unit of updatedUnits) {
+        if (unit.target && !originalIds.has(unit.id)) {
+            updated++;
+        }
+    }
     return { updated, unchanged };
 }
 
@@ -50407,6 +50414,7 @@ class XliffFormatter extends base_1.BaseFormatter {
             const unitTag = extractResult.formatInfo.format === 'xliff-2.0' ? 'unit' : 'trans-unit';
             let content = originalContent;
             let patchedCount = 0;
+            const missedUnits = [];
             for (const unit of unitsToUpdate) {
                 const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options, unit.source);
                 const patched = this.patchUnit(content, unit.id, targetXml, unitTag);
@@ -50414,6 +50422,15 @@ class XliffFormatter extends base_1.BaseFormatter {
                     content = patched;
                     patchedCount++;
                 }
+                else {
+                    missedUnits.push(unit);
+                }
+            }
+            // Insert new trans-units that don't exist in the target file yet
+            if (missedUnits.length > 0) {
+                logger_1.logger.info(`XLIFF formatter: inserting ${missedUnits.length} new units`);
+                content = this.insertNewUnits(content, missedUnits, unitTag, options);
+                patchedCount += missedUnits.length;
             }
             logger_1.logger.info(`XLIFF formatter: patched ${patchedCount} units in-place`);
             return {
@@ -50460,6 +50477,74 @@ class XliffFormatter extends base_1.BaseFormatter {
         return (content.substring(0, match.index) +
             newFullMatch +
             content.substring(match.index + match[0].length));
+    }
+    /**
+     * Insert new trans-unit/unit elements that don't exist in the target file.
+     * Appends them before the closing </body> (XLIFF 1.2) or </file> (XLIFF 2.0) tag.
+     */
+    insertNewUnits(content, units, unitTag, options) {
+        // Detect indentation from existing units
+        const existingUnitMatch = content.match(new RegExp(`([ \t]*)<${unitTag}\\s`));
+        const unitIndent = existingUnitMatch ? existingUnitMatch[1] : '      ';
+        const childIndent = unitIndent + '  ';
+        // Build XML for each new unit
+        const newBlocks = [];
+        for (const unit of units) {
+            const targetXml = this.buildTargetXmlString(unit.target, unit.metadata.placeholders, options, unit.source);
+            const sourceXml = `<source>${this.buildSourceXmlString(unit.source, unit.metadata.placeholders)}</source>`;
+            if (unitTag === 'unit') {
+                // XLIFF 2.0: <unit id="..."><segment><source>...</source><target>...</target></segment></unit>
+                newBlocks.push(`${unitIndent}<${unitTag} id="${this.escapeXmlAttr(unit.id)}">\n` +
+                    `${childIndent}<segment>\n` +
+                    `${childIndent}  ${sourceXml}\n` +
+                    `${childIndent}  ${targetXml}\n` +
+                    `${childIndent}</segment>\n` +
+                    `${unitIndent}</${unitTag}>`);
+            }
+            else {
+                // XLIFF 1.2: <trans-unit id="..."><source>...</source><target>...</target></trans-unit>
+                newBlocks.push(`${unitIndent}<${unitTag} id="${this.escapeXmlAttr(unit.id)}" datatype="html">\n` +
+                    `${childIndent}${sourceXml}\n` +
+                    `${childIndent}${targetXml}\n` +
+                    `${unitIndent}</${unitTag}>`);
+            }
+        }
+        const insertionXml = newBlocks.join('\n');
+        // Find insertion point: before </body> (1.2) or before the last </file> (2.0)
+        const closingTag = unitTag === 'unit' ? '</file>' : '</body>';
+        const closingIdx = content.lastIndexOf(closingTag);
+        if (closingIdx === -1) {
+            logger_1.logger.warning(`Could not find ${closingTag} to insert new units`);
+            return content;
+        }
+        // Insert before the closing tag, with a newline
+        return content.substring(0, closingIdx) + insertionXml + '\n' + content.substring(closingIdx);
+    }
+    /**
+     * Build source XML content string, restoring placeholders
+     */
+    buildSourceXmlString(text, placeholders) {
+        if (!placeholders || placeholders.length === 0) {
+            return this.escapeXml(text);
+        }
+        const placeholderMap = new Map(placeholders.map(ph => [ph.marker, ph]));
+        const markerPatterns = placeholders.map(ph => ph.marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        const markerRegex = new RegExp(`(${markerPatterns.join('|')})`, 'g');
+        const parts = text.split(markerRegex);
+        let innerXml = '';
+        for (const part of parts) {
+            if (!part) {
+                continue;
+            }
+            const ph = placeholderMap.get(part);
+            if (ph) {
+                innerXml += this.buildPlaceholderXmlString(ph);
+            }
+            else {
+                innerXml += this.escapeXml(part);
+            }
+        }
+        return innerXml;
     }
     /**
      * Build a <target>...</target> XML string with placeholders restored
