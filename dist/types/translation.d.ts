@@ -67,6 +67,8 @@ export interface TranslationRequest {
     context?: string;
     preserveFormatting: boolean;
     preservePlaceholders: boolean;
+    /** When set, providers use this instead of buildUserPrompt() */
+    customUserPrompt?: string;
 }
 /**
  * Result of a translation request

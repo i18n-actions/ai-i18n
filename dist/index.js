@@ -53044,6 +53044,8 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.buildSystemPrompt = buildSystemPrompt;
 exports.buildUserPrompt = buildUserPrompt;
 exports.buildPluralPrompt = buildPluralPrompt;
+exports.findMissingPlaceholders = findMissingPlaceholders;
+exports.buildPlaceholderRetryPrompt = buildPlaceholderRetryPrompt;
 exports.validateTranslation = validateTranslation;
 exports.extractSurroundingContext = extractSurroundingContext;
 const parser_1 = __nccwpck_require__(8300);
@@ -53200,6 +53202,44 @@ Respond with JSON:
 }`;
     return prompt;
 }
+/** Regex matching placeholder tokens (shared by validation helpers) */
+const PLACEHOLDER_REGEX = /\{\{[^}]+\}\}|\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
+/**
+ * Return the list of placeholder strings present in source but missing from translation.
+ * Returns an empty array when the translation is complete.
+ */
+function findMissingPlaceholders(source, translation) {
+    const sourcePlaceholders = source.match(PLACEHOLDER_REGEX) ?? [];
+    const translationPlaceholders = new Set(translation.match(PLACEHOLDER_REGEX) ?? []);
+    const missing = [];
+    for (const ph of sourcePlaceholders) {
+        if (!translationPlaceholders.has(ph)) {
+            missing.push(ph);
+        }
+    }
+    return [...new Set(missing)];
+}
+/**
+ * Build a targeted retry prompt that shows the failed translations and
+ * explicitly names the placeholders that were dropped.
+ */
+function buildPlaceholderRetryPrompt(units, sourceLanguage, targetLanguage) {
+    let prompt = `Some translations from ${sourceLanguage} to ${targetLanguage} are missing required placeholders.
+Re-translate ONLY the units listed below. Every placeholder shown in the "Missing placeholders" list MUST appear in your translation exactly as written.\n\n`;
+    for (const unit of units) {
+        prompt += `ID: ${unit.id}\n`;
+        prompt += `Source: ${unit.source}\n`;
+        prompt += `Your previous translation: ${unit.brokenTarget}\n`;
+        prompt += `Missing placeholders: ${unit.missing.join(', ')}\n\n`;
+    }
+    prompt += `Respond with JSON containing all translations:
+{
+  "translations": [
+    {"id": "string_id", "translation": "translated text with ALL placeholders preserved"}
+  ]
+}`;
+    return prompt;
+}
 /**
  * Validate that a translation preserves required elements
  */
@@ -53208,9 +53248,8 @@ function validateTranslation(source, translation, options) {
     const issues = [];
     if (opts.preservePlaceholders) {
         // Extract placeholders from source (including {{...}} markers for XLIFF elements)
-        const placeholderRegex = /\{\{[^}]+\}\}|\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
-        const sourcePlaceholders = new Set(source.match(placeholderRegex) ?? []);
-        const translationPlaceholders = new Set(translation.match(placeholderRegex) ?? []);
+        const sourcePlaceholders = new Set(source.match(PLACEHOLDER_REGEX) ?? []);
+        const translationPlaceholders = new Set(translation.match(PLACEHOLDER_REGEX) ?? []);
         // Check for missing placeholders
         for (const placeholder of sourcePlaceholders) {
             if (!translationPlaceholders.has(placeholder)) {
@@ -53287,6 +53326,7 @@ exports.createOrchestrator = createOrchestrator;
 const errors_1 = __nccwpck_require__(6550);
 const logger_1 = __nccwpck_require__(7893);
 const batcher_1 = __nccwpck_require__(6596);
+const context_builder_1 = __nccwpck_require__(2162);
 const rate_limiter_1 = __nccwpck_require__(5024);
 const anthropic_1 = __nccwpck_require__(8618);
 const openai_1 = __nccwpck_require__(4282);
@@ -53412,6 +53452,89 @@ class TranslationOrchestrator {
             if (retryResponse.usage) {
                 totalInputTokens += retryResponse.usage.inputTokens;
                 totalOutputTokens += retryResponse.usage.outputTokens;
+            }
+        }
+        // Validate placeholder completeness and retry broken translations
+        if (request.preservePlaceholders) {
+            const sourceMap = new Map(request.units.map(u => [u.id, u.source]));
+            const broken = [];
+            for (const t of allTranslations) {
+                const source = sourceMap.get(t.id);
+                if (!source) {
+                    continue;
+                }
+                const missing = (0, context_builder_1.findMissingPlaceholders)(source, t.target);
+                if (missing.length > 0) {
+                    broken.push({ id: t.id, source, brokenTarget: t.target, missing });
+                }
+            }
+            if (broken.length > 0) {
+                logger_1.logger.info(`Retrying ${broken.length} translation(s) with missing placeholders...`);
+                const placeholderRetryResponse = await this.retryBrokenPlaceholders(broken, request);
+                // Build a lookup of retry results
+                const retryMap = new Map(placeholderRetryResponse.translations.map(t => [t.id, t]));
+                // Replace broken translations only when the retry actually fixed them
+                for (let i = 0; i < allTranslations.length; i++) {
+                    const retried = retryMap.get(allTranslations[i].id);
+                    if (!retried) {
+                        continue;
+                    }
+                    const source = sourceMap.get(retried.id);
+                    const stillMissing = (0, context_builder_1.findMissingPlaceholders)(source, retried.target);
+                    if (stillMissing.length === 0) {
+                        allTranslations[i] = retried;
+                    }
+                    else {
+                        logger_1.logger.warning(`Placeholder retry still incomplete for ${retried.id}, keeping original. Missing: ${stillMissing.join(', ')}`);
+                    }
+                }
+                if (placeholderRetryResponse.usage) {
+                    totalInputTokens += placeholderRetryResponse.usage.inputTokens;
+                    totalOutputTokens += placeholderRetryResponse.usage.outputTokens;
+                }
+            }
+        }
+        return {
+            translations: allTranslations,
+            usage: totalInputTokens > 0 || totalOutputTokens > 0
+                ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
+                : undefined,
+            provider: this.translator.providerName,
+            model: this.translator.getModel(),
+        };
+    }
+    /**
+     * Retry translations that have missing placeholders with a targeted prompt
+     */
+    async retryBrokenPlaceholders(broken, originalRequest) {
+        const allTranslations = [];
+        let totalInputTokens = 0;
+        let totalOutputTokens = 0;
+        // Batch broken translations (max 5 per batch, matching existing retry pattern)
+        for (let i = 0; i < broken.length; i += 5) {
+            const batch = broken.slice(i, i + 5);
+            const customUserPrompt = (0, context_builder_1.buildPlaceholderRetryPrompt)(batch, originalRequest.sourceLanguage, originalRequest.targetLanguage);
+            // Build units for the batch so the provider can map IDs back
+            const batchUnits = batch.map(b => {
+                const unit = originalRequest.units.find(u => u.id === b.id);
+                return unit;
+            });
+            try {
+                await this.rateLimiter.acquire();
+                const batchRequest = {
+                    ...originalRequest,
+                    units: batchUnits,
+                    customUserPrompt,
+                };
+                const result = await this.translator.translate(batchRequest);
+                allTranslations.push(...result.translations);
+                if (result.usage) {
+                    totalInputTokens += result.usage.inputTokens;
+                    totalOutputTokens += result.usage.outputTokens;
+                }
+            }
+            catch (error) {
+                logger_1.logger.warning(`Placeholder retry batch failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
             }
         }
         return {
@@ -53587,10 +53710,11 @@ class AnthropicTranslator extends base_1.BaseTranslator {
             preserveFormatting: request.preserveFormatting,
             preservePlaceholders: request.preservePlaceholders,
         });
-        const userPrompt = (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
-            preserveFormatting: request.preserveFormatting,
-            preservePlaceholders: request.preservePlaceholders,
-        });
+        const userPrompt = request.customUserPrompt ??
+            (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
+                preserveFormatting: request.preserveFormatting,
+                preservePlaceholders: request.preservePlaceholders,
+            });
         const expectedIds = request.units.map(u => u.id);
         logger_1.logger.debug(`Translating ${request.units.length} units with Anthropic ${model}`);
         const response = await (0, retry_1.withRetry)(async () => {
@@ -53744,10 +53868,11 @@ class OllamaTranslator extends base_1.BaseTranslator {
             preserveFormatting: request.preserveFormatting,
             preservePlaceholders: request.preservePlaceholders,
         });
-        const userPrompt = (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
-            preserveFormatting: request.preserveFormatting,
-            preservePlaceholders: request.preservePlaceholders,
-        });
+        const userPrompt = request.customUserPrompt ??
+            (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
+                preserveFormatting: request.preserveFormatting,
+                preservePlaceholders: request.preservePlaceholders,
+            });
         const expectedIds = request.units.map(u => u.id);
         logger_1.logger.debug(`Translating ${request.units.length} units with Ollama ${model}`);
         const response = await (0, retry_1.withRetry)(async () => {
@@ -53947,10 +54072,11 @@ class OpenAITranslator extends base_1.BaseTranslator {
             preserveFormatting: request.preserveFormatting,
             preservePlaceholders: request.preservePlaceholders,
         });
-        const userPrompt = (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
-            preserveFormatting: request.preserveFormatting,
-            preservePlaceholders: request.preservePlaceholders,
-        });
+        const userPrompt = request.customUserPrompt ??
+            (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
+                preserveFormatting: request.preserveFormatting,
+                preservePlaceholders: request.preservePlaceholders,
+            });
         const expectedIds = request.units.map(u => u.id);
         logger_1.logger.debug(`Translating ${request.units.length} units with OpenAI ${model}`);
         const response = await (0, retry_1.withRetry)(async () => {

@@ -51,6 +51,10 @@ export declare class TranslationOrchestrator {
      */
     translate(request: TranslationRequest): Promise<TranslationResponse>;
     /**
+     * Retry translations that have missing placeholders with a targeted prompt
+     */
+    private retryBrokenPlaceholders;
+    /**
      * Retry translating missing units with smaller batch sizes
      */
     private retryMissingUnits;

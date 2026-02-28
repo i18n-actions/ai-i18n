@@ -1,9 +1,10 @@
 import { ConfigError } from '../utils/errors';
 import { logger } from '../utils/logger';
 import type { ProviderConfig, Provider } from '../config/types';
-import type { TranslationRequest, TranslationResponse } from '../types/translation';
+import type { TranslationRequest, TranslationResponse, TranslatedUnit } from '../types/translation';
 import { BaseTranslator } from './base';
 import { createBatches, TranslationBatch, BatchProcessor } from './batcher';
+import { findMissingPlaceholders, buildPlaceholderRetryPrompt } from './context-builder';
 import { createProviderRateLimiter, RateLimiter } from './rate-limiter';
 import { AnthropicTranslator } from './providers/anthropic';
 import { OpenAITranslator } from './providers/openai';
@@ -192,6 +193,120 @@ export class TranslationOrchestrator {
       if (retryResponse.usage) {
         totalInputTokens += retryResponse.usage.inputTokens;
         totalOutputTokens += retryResponse.usage.outputTokens;
+      }
+    }
+
+    // Validate placeholder completeness and retry broken translations
+    if (request.preservePlaceholders) {
+      const sourceMap = new Map(request.units.map(u => [u.id, u.source]));
+      const broken: Array<{
+        id: string;
+        source: string;
+        brokenTarget: string;
+        missing: string[];
+      }> = [];
+
+      for (const t of allTranslations) {
+        const source = sourceMap.get(t.id);
+        if (!source) {
+          continue;
+        }
+        const missing = findMissingPlaceholders(source, t.target);
+        if (missing.length > 0) {
+          broken.push({ id: t.id, source, brokenTarget: t.target, missing });
+        }
+      }
+
+      if (broken.length > 0) {
+        logger.info(`Retrying ${broken.length} translation(s) with missing placeholders...`);
+
+        const placeholderRetryResponse = await this.retryBrokenPlaceholders(broken, request);
+
+        // Build a lookup of retry results
+        const retryMap = new Map(placeholderRetryResponse.translations.map(t => [t.id, t]));
+
+        // Replace broken translations only when the retry actually fixed them
+        for (let i = 0; i < allTranslations.length; i++) {
+          const retried = retryMap.get(allTranslations[i].id);
+          if (!retried) {
+            continue;
+          }
+          const source = sourceMap.get(retried.id)!;
+          const stillMissing = findMissingPlaceholders(source, retried.target);
+          if (stillMissing.length === 0) {
+            allTranslations[i] = retried;
+          } else {
+            logger.warning(
+              `Placeholder retry still incomplete for ${retried.id}, keeping original. Missing: ${stillMissing.join(', ')}`
+            );
+          }
+        }
+
+        if (placeholderRetryResponse.usage) {
+          totalInputTokens += placeholderRetryResponse.usage.inputTokens;
+          totalOutputTokens += placeholderRetryResponse.usage.outputTokens;
+        }
+      }
+    }
+
+    return {
+      translations: allTranslations,
+      usage:
+        totalInputTokens > 0 || totalOutputTokens > 0
+          ? { inputTokens: totalInputTokens, outputTokens: totalOutputTokens }
+          : undefined,
+      provider: this.translator.providerName,
+      model: this.translator.getModel(),
+    };
+  }
+
+  /**
+   * Retry translations that have missing placeholders with a targeted prompt
+   */
+  private async retryBrokenPlaceholders(
+    broken: Array<{ id: string; source: string; brokenTarget: string; missing: string[] }>,
+    originalRequest: TranslationRequest
+  ): Promise<TranslationResponse> {
+    const allTranslations: TranslatedUnit[] = [];
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+
+    // Batch broken translations (max 5 per batch, matching existing retry pattern)
+    for (let i = 0; i < broken.length; i += 5) {
+      const batch = broken.slice(i, i + 5);
+
+      const customUserPrompt = buildPlaceholderRetryPrompt(
+        batch,
+        originalRequest.sourceLanguage,
+        originalRequest.targetLanguage
+      );
+
+      // Build units for the batch so the provider can map IDs back
+      const batchUnits = batch.map(b => {
+        const unit = originalRequest.units.find(u => u.id === b.id);
+        return unit!;
+      });
+
+      try {
+        await this.rateLimiter.acquire();
+
+        const batchRequest: TranslationRequest = {
+          ...originalRequest,
+          units: batchUnits,
+          customUserPrompt,
+        };
+
+        const result = await this.translator.translate(batchRequest);
+        allTranslations.push(...result.translations);
+
+        if (result.usage) {
+          totalInputTokens += result.usage.inputTokens;
+          totalOutputTokens += result.usage.outputTokens;
+        }
+      } catch (error) {
+        logger.warning(
+          `Placeholder retry batch failed: ${error instanceof Error ? error.message : 'Unknown error'}`
+        );
       }
     }
 

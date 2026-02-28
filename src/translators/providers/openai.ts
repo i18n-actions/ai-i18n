@@ -87,15 +87,12 @@ export class OpenAITranslator extends BaseTranslator {
       preservePlaceholders: request.preservePlaceholders,
     });
 
-    const userPrompt = buildUserPrompt(
-      request.units,
-      request.sourceLanguage,
-      request.targetLanguage,
-      {
+    const userPrompt =
+      request.customUserPrompt ??
+      buildUserPrompt(request.units, request.sourceLanguage, request.targetLanguage, {
         preserveFormatting: request.preserveFormatting,
         preservePlaceholders: request.preservePlaceholders,
-      }
-    );
+      });
 
     const expectedIds = request.units.map(u => u.id);
 

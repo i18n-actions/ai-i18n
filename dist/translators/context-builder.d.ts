@@ -41,6 +41,21 @@ export declare function buildPluralPrompt(variable: string, sourceVariants: Arra
     text: string;
 }>, sourceLanguage: string, targetLanguage: string, targetCategories: PluralCategory[]): string;
 /**
+ * Return the list of placeholder strings present in source but missing from translation.
+ * Returns an empty array when the translation is complete.
+ */
+export declare function findMissingPlaceholders(source: string, translation: string): string[];
+/**
+ * Build a targeted retry prompt that shows the failed translations and
+ * explicitly names the placeholders that were dropped.
+ */
+export declare function buildPlaceholderRetryPrompt(units: Array<{
+    id: string;
+    source: string;
+    brokenTarget: string;
+    missing: string[];
+}>, sourceLanguage: string, targetLanguage: string): string;
+/**
  * Validate that a translation preserves required elements
  */
 export declare function validateTranslation(source: string, translation: string, options?: Partial<ContextBuilderOptions>): {

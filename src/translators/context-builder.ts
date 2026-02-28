@@ -231,6 +231,55 @@ Respond with JSON:
   return prompt;
 }
 
+/** Regex matching placeholder tokens (shared by validation helpers) */
+const PLACEHOLDER_REGEX = /\{\{[^}]+\}\}|\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
+
+/**
+ * Return the list of placeholder strings present in source but missing from translation.
+ * Returns an empty array when the translation is complete.
+ */
+export function findMissingPlaceholders(source: string, translation: string): string[] {
+  const sourcePlaceholders = source.match(PLACEHOLDER_REGEX) ?? [];
+  const translationPlaceholders = new Set(translation.match(PLACEHOLDER_REGEX) ?? []);
+
+  const missing: string[] = [];
+  for (const ph of sourcePlaceholders) {
+    if (!translationPlaceholders.has(ph)) {
+      missing.push(ph);
+    }
+  }
+  return [...new Set(missing)];
+}
+
+/**
+ * Build a targeted retry prompt that shows the failed translations and
+ * explicitly names the placeholders that were dropped.
+ */
+export function buildPlaceholderRetryPrompt(
+  units: Array<{ id: string; source: string; brokenTarget: string; missing: string[] }>,
+  sourceLanguage: string,
+  targetLanguage: string
+): string {
+  let prompt = `Some translations from ${sourceLanguage} to ${targetLanguage} are missing required placeholders.
+Re-translate ONLY the units listed below. Every placeholder shown in the "Missing placeholders" list MUST appear in your translation exactly as written.\n\n`;
+
+  for (const unit of units) {
+    prompt += `ID: ${unit.id}\n`;
+    prompt += `Source: ${unit.source}\n`;
+    prompt += `Your previous translation: ${unit.brokenTarget}\n`;
+    prompt += `Missing placeholders: ${unit.missing.join(', ')}\n\n`;
+  }
+
+  prompt += `Respond with JSON containing all translations:
+{
+  "translations": [
+    {"id": "string_id", "translation": "translated text with ALL placeholders preserved"}
+  ]
+}`;
+
+  return prompt;
+}
+
 /**
  * Validate that a translation preserves required elements
  */
@@ -244,9 +293,8 @@ export function validateTranslation(
 
   if (opts.preservePlaceholders) {
     // Extract placeholders from source (including {{...}} markers for XLIFF elements)
-    const placeholderRegex = /\{\{[^}]+\}\}|\{[^}]+\}|<[^>]+>|<\/[^>]+>/g;
-    const sourcePlaceholders = new Set(source.match(placeholderRegex) ?? []);
-    const translationPlaceholders = new Set(translation.match(placeholderRegex) ?? []);
+    const sourcePlaceholders = new Set(source.match(PLACEHOLDER_REGEX) ?? []);
+    const translationPlaceholders = new Set(translation.match(PLACEHOLDER_REGEX) ?? []);
 
     // Check for missing placeholders
     for (const placeholder of sourcePlaceholders) {
