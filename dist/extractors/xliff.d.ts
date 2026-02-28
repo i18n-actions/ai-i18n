@@ -8,6 +8,12 @@ export declare class XliffExtractor extends BaseExtractor {
     readonly fileExtensions: string[];
     private parser;
     /**
+     * Ordered parser preserves element position relative to text nodes.
+     * Required for correct extraction of inline elements like <x id="PH"/>
+     * interspersed with text content.
+     */
+    private orderedParser;
+    /**
      * Detect XLIFF version from content
      */
     detect(content: string): FormatInfo | null;
@@ -38,26 +44,31 @@ export declare class XliffExtractor extends BaseExtractor {
     /** XLIFF inline element tag names that should be treated as placeholders */
     private static readonly PLACEHOLDER_TAGS;
     /**
-     * Context object for extracting text with placeholders
-     */
-    private createPlaceholderContext;
-    /**
-     * Extract text content from element, preserving placeholders as markers
-     * Returns the text with placeholder markers (e.g., {{PH}}, {{0}})
+     * Extract text content from element (plain text, no placeholder tracking).
+     * Used for notes, context, and other non-inline-element fields.
      */
     private extractTextContent;
     /**
-     * Extract text and placeholders from element
-     * Returns text with markers, and populates the placeholders array
+     * Build a map from unit ID to ordered (preserveOrder: true) children of source/target.
+     * This preserves the position of inline XML elements relative to text nodes.
      */
-    private extractTextWithPlaceholders;
+    private buildOrderedSourceMap;
     /**
-     * Extract a placeholder element and create its marker
+     * Get an attribute from a preserveOrder node's ':@' entry.
      */
-    private extractPlaceholder;
+    private getOrderedAttr;
     /**
-     * Extract text content and placeholders from a source/target element
-     * Returns both the text (with placeholder markers) and the placeholder array
+     * Find the children array of a named element within a preserveOrder children array.
+     */
+    private getOrderedElementChildren;
+    /**
+     * Walk ordered (preserveOrder: true) children and extract text with {{marker}} placeholders.
+     * Correctly preserves the position of inline elements relative to text.
+     */
+    private extractOrderedContent;
+    /**
+     * Extract text content and placeholders from ordered children.
+     * Returns both the text (with placeholder markers) and the placeholder array.
      */
     extractContentWithPlaceholders(element: unknown): {
         text: string;

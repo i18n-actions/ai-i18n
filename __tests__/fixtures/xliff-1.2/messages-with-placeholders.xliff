@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
+  <file source-language="en" target-language="de" datatype="plaintext" original="messages">
+    <body>
+      <trans-unit id="simple_ph">
+        <source>Click <x id="PH"/> to continue</source>
+        <target></target>
+        <note>Simple placeholder test</note>
+      </trans-unit>
+      <trans-unit id="interpolation">
+        <source>Hello <x id="INTERPOLATION"/>, welcome!</source>
+        <target></target>
+      </trans-unit>
+      <trans-unit id="multiple_ph">
+        <source><x id="START_TAG_SPAN"/>Click here<x id="CLOSE_TAG_SPAN"/> or <x id="START_TAG_SPAN"/>there<x id="CLOSE_TAG_SPAN"/></source>
+        <target></target>
+      </trans-unit>
+      <trans-unit id="no_placeholders">
+        <source>Simple text without placeholders</source>
+        <target></target>
+      </trans-unit>
+      <trans-unit id="with_existing_target">
+        <source>Update <x id="PH"/> now</source>
+        <target>Aktualisiere <x id="PH"/> jetzt</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

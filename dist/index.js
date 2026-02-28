@@ -49463,6 +49463,19 @@ class XliffExtractor extends base_1.BaseExtractor {
         parseAttributeValue: false,
     });
     /**
+     * Ordered parser preserves element position relative to text nodes.
+     * Required for correct extraction of inline elements like <x id="PH"/>
+     * interspersed with text content.
+     */
+    orderedParser = new fast_xml_parser_1.XMLParser({
+        ignoreAttributes: false,
+        attributeNamePrefix: '@_',
+        textNodeName: '#text',
+        preserveOrder: true,
+        trimValues: false,
+        parseAttributeValue: false,
+    });
+    /**
      * Detect XLIFF version from content
      */
     detect(content) {
@@ -49537,6 +49550,8 @@ class XliffExtractor extends base_1.BaseExtractor {
         if (!xliff) {
             throw new errors_1.ExtractorError('Invalid XLIFF 1.2: missing xliff element', filePath);
         }
+        // Build ordered source map for correct inline element extraction
+        const orderedMap = this.buildOrderedSourceMap(content, 'xliff-1.2');
         // Get source language from file element
         let sourceLanguage = 'en';
         const fileElement = this.normalizeArray(xliff['file'])[0];
@@ -49556,12 +49571,18 @@ class XliffExtractor extends base_1.BaseExtractor {
                 if (!id) {
                     continue;
                 }
-                // Extract source with placeholders preserved as markers
-                const sourceExtraction = this.extractContentWithPlaceholders(unit['source']);
-                const source = sourceExtraction.text;
-                const placeholders = sourceExtraction.placeholders;
-                // Extract target (simple extraction - we'll restore placeholders when formatting)
-                const target = this.extractTextContent(unit['target']);
+                // Extract source with placeholders from ordered map (preserves element position)
+                const ordered = orderedMap.get(id);
+                const ctx = { placeholders: [], counter: 0 };
+                const source = ordered?.source.length
+                    ? this.extractOrderedContent(ordered.source, ctx)
+                    : this.extractTextContent(unit['source']);
+                const placeholders = ctx.placeholders;
+                // Extract target with placeholder markers
+                const targetCtx = { placeholders: [], counter: 0 };
+                const target = ordered?.target.length
+                    ? this.extractOrderedContent(ordered.target, targetCtx)
+                    : this.extractTextContent(unit['target']);
                 // Get notes if requested
                 let notes;
                 if (options?.includeNotes !== false) {
@@ -49618,6 +49639,8 @@ class XliffExtractor extends base_1.BaseExtractor {
         if (!xliff) {
             throw new errors_1.ExtractorError('Invalid XLIFF 2.0: missing xliff element', filePath);
         }
+        // Build ordered source map for correct inline element extraction
+        const orderedMap = this.buildOrderedSourceMap(content, 'xliff-2.0');
         const sourceLanguage = xliff['@_srcLang'] ?? 'en';
         // Process file elements
         const files = this.normalizeArray(xliff['file']);
@@ -49626,11 +49649,11 @@ class XliffExtractor extends base_1.BaseExtractor {
             const fileUnits = this.normalizeArray(file['unit']);
             const groups = this.normalizeArray(file['group']);
             // Process direct units
-            this.processXliff2Units(fileUnits, units, filePath, options);
+            this.processXliff2Units(fileUnits, units, filePath, orderedMap, options);
             // Process units within groups
             for (const group of groups) {
                 const groupUnits = this.normalizeArray(group['unit']);
-                this.processXliff2Units(groupUnits, units, filePath, options);
+                this.processXliff2Units(groupUnits, units, filePath, orderedMap, options);
             }
         }
         return {
@@ -49645,7 +49668,7 @@ class XliffExtractor extends base_1.BaseExtractor {
     /**
      * Process XLIFF 2.0 unit elements
      */
-    processXliff2Units(unitElements, units, filePath, options) {
+    processXliff2Units(unitElements, units, filePath, orderedMap, options) {
         for (const unit of unitElements) {
             const id = unit['@_id'];
             if (!id) {
@@ -49656,12 +49679,18 @@ class XliffExtractor extends base_1.BaseExtractor {
             if (!segment) {
                 continue;
             }
-            // Extract source with placeholders preserved as markers
-            const sourceExtraction = this.extractContentWithPlaceholders(segment['source']);
-            const source = sourceExtraction.text;
-            const placeholders = sourceExtraction.placeholders;
-            // Extract target (simple extraction)
-            const target = this.extractTextContent(segment['target']);
+            // Extract source with placeholders from ordered map (preserves element position)
+            const ordered = orderedMap.get(id);
+            const ctx = { placeholders: [], counter: 0 };
+            const source = ordered?.source.length
+                ? this.extractOrderedContent(ordered.source, ctx)
+                : this.extractTextContent(segment['source']);
+            const placeholders = ctx.placeholders;
+            // Extract target with placeholder markers
+            const targetCtx = { placeholders: [], counter: 0 };
+            const target = ordered?.target.length
+                ? this.extractOrderedContent(ordered.target, targetCtx)
+                : this.extractTextContent(segment['target']);
             // Get notes if requested
             let notes;
             if (options?.includeNotes !== false) {
@@ -49714,24 +49743,10 @@ class XliffExtractor extends base_1.BaseExtractor {
         'ec', // XLIFF 2.0: end code
     ]);
     /**
-     * Context object for extracting text with placeholders
-     */
-    createPlaceholderContext() {
-        return { placeholders: [], counter: 0 };
-    }
-    /**
-     * Extract text content from element, preserving placeholders as markers
-     * Returns the text with placeholder markers (e.g., {{PH}}, {{0}})
+     * Extract text content from element (plain text, no placeholder tracking).
+     * Used for notes, context, and other non-inline-element fields.
      */
     extractTextContent(element) {
-        const ctx = this.createPlaceholderContext();
-        return this.extractTextWithPlaceholders(element, ctx);
-    }
-    /**
-     * Extract text and placeholders from element
-     * Returns text with markers, and populates the placeholders array
-     */
-    extractTextWithPlaceholders(element, ctx) {
         if (element === undefined || element === null) {
             return '';
         }
@@ -49740,32 +49755,23 @@ class XliffExtractor extends base_1.BaseExtractor {
         }
         if (typeof element === 'object') {
             const obj = element;
-            // Handle text node
-            if ('#text' in obj && Object.keys(obj).length === 1) {
+            if ('#text' in obj) {
                 return String(obj['#text']);
             }
-            // Handle complex content (inline elements like <ph>, <x/>, etc.)
             let result = '';
             for (const [key, value] of Object.entries(obj)) {
-                if (key.startsWith('@_')) {
-                    continue; // Skip attributes at this level
-                }
+                if (key.startsWith('@_'))
+                    continue;
                 if (key === '#text') {
                     result += String(value);
                 }
-                else if (XliffExtractor.PLACEHOLDER_TAGS.has(key)) {
-                    // This is a placeholder element - extract and create marker
-                    const placeholder = this.extractPlaceholder(key, value, ctx);
-                    result += placeholder.marker;
-                    ctx.placeholders.push(placeholder);
-                }
                 else if (Array.isArray(value)) {
                     for (const item of value) {
-                        result += this.extractTextWithPlaceholders(item, ctx);
+                        result += this.extractTextContent(item);
                     }
                 }
                 else if (typeof value === 'object' && value !== null) {
-                    result += this.extractTextWithPlaceholders(value, ctx);
+                    result += this.extractTextContent(value);
                 }
             }
             return result;
@@ -49773,49 +49779,136 @@ class XliffExtractor extends base_1.BaseExtractor {
         return String(element);
     }
     /**
-     * Extract a placeholder element and create its marker
+     * Build a map from unit ID to ordered (preserveOrder: true) children of source/target.
+     * This preserves the position of inline XML elements relative to text nodes.
      */
-    extractPlaceholder(tagName, value, ctx) {
-        const attributes = {};
-        // Extract attributes from the element
-        if (typeof value === 'object' && value !== null) {
-            const obj = value;
-            for (const [key, val] of Object.entries(obj)) {
-                if (key.startsWith('@_')) {
-                    // This is an attribute
-                    attributes[key.substring(2)] = String(val);
+    buildOrderedSourceMap(content, format) {
+        const map = new Map();
+        const parsed = this.orderedParser.parse(content);
+        const walk = (nodes) => {
+            for (const node of nodes) {
+                if (typeof node !== 'object' || node === null)
+                    continue;
+                const obj = node;
+                if (format === 'xliff-1.2' && 'trans-unit' in obj) {
+                    const children = obj['trans-unit'];
+                    if (!Array.isArray(children))
+                        continue;
+                    const id = this.getOrderedAttr(obj, '@_id');
+                    if (!id)
+                        continue;
+                    map.set(id, {
+                        source: this.getOrderedElementChildren(children, 'source'),
+                        target: this.getOrderedElementChildren(children, 'target'),
+                    });
                 }
-                // Note: inner text (#text) is ignored for placeholders as they're typically self-closing
+                else if (format === 'xliff-2.0' && 'unit' in obj) {
+                    const unitChildren = obj['unit'];
+                    if (!Array.isArray(unitChildren))
+                        continue;
+                    const id = this.getOrderedAttr(obj, '@_id');
+                    if (!id)
+                        continue;
+                    const segmentChildren = this.getOrderedElementChildren(unitChildren, 'segment');
+                    map.set(id, {
+                        source: this.getOrderedElementChildren(segmentChildren, 'source'),
+                        target: this.getOrderedElementChildren(segmentChildren, 'target'),
+                    });
+                }
+                for (const value of Object.values(obj)) {
+                    if (Array.isArray(value))
+                        walk(value);
+                }
             }
-        }
-        // Determine the marker name - prefer 'id', then 'equiv-text', then counter
-        let markerName;
-        if (attributes['id']) {
-            markerName = attributes['id'];
-        }
-        else if (attributes['equiv-text']) {
-            // Clean up equiv-text for use as marker (remove special chars)
-            markerName = attributes['equiv-text'].replace(/[^a-zA-Z0-9_]/g, '_');
-        }
-        else {
-            markerName = String(ctx.counter++);
-        }
-        // Create the marker string - use double braces to be distinct
-        const marker = `{{${markerName}}}`;
-        return {
-            marker,
-            tagName,
-            attributes,
         };
+        walk(parsed);
+        return map;
     }
     /**
-     * Extract text content and placeholders from a source/target element
-     * Returns both the text (with placeholder markers) and the placeholder array
+     * Get an attribute from a preserveOrder node's ':@' entry.
+     */
+    getOrderedAttr(node, attrName) {
+        const attrs = node[':@'];
+        return attrs && attrName in attrs ? String(attrs[attrName]) : undefined;
+    }
+    /**
+     * Find the children array of a named element within a preserveOrder children array.
+     */
+    getOrderedElementChildren(children, elementName) {
+        for (const child of children) {
+            if (typeof child === 'object' && child !== null && elementName in child) {
+                const el = child[elementName];
+                return Array.isArray(el) ? el : [];
+            }
+        }
+        return [];
+    }
+    /**
+     * Walk ordered (preserveOrder: true) children and extract text with {{marker}} placeholders.
+     * Correctly preserves the position of inline elements relative to text.
+     */
+    extractOrderedContent(children, ctx) {
+        let result = '';
+        for (const node of children) {
+            if (typeof node !== 'object' || node === null)
+                continue;
+            const obj = node;
+            if ('#text' in obj) {
+                result += String(obj['#text']);
+                continue;
+            }
+            // Find tag name (key that isn't ':@' or '#text')
+            const tagName = Object.keys(obj).find(k => k !== ':@' && k !== '#text');
+            if (!tagName)
+                continue;
+            if (XliffExtractor.PLACEHOLDER_TAGS.has(tagName)) {
+                const attrs = obj[':@'];
+                const attributes = {};
+                if (attrs) {
+                    for (const [key, val] of Object.entries(attrs)) {
+                        if (key.startsWith('@_')) {
+                            attributes[key.substring(2)] = String(val);
+                        }
+                    }
+                }
+                let markerName;
+                if (attributes['id']) {
+                    markerName = attributes['id'];
+                }
+                else if (attributes['equiv-text']) {
+                    markerName = attributes['equiv-text'].replace(/[^a-zA-Z0-9_]/g, '_');
+                }
+                else {
+                    markerName = String(ctx.counter++);
+                }
+                const marker = `{{${markerName}}}`;
+                ctx.placeholders.push({ marker, tagName, attributes });
+                result += marker;
+            }
+            else {
+                // Non-placeholder element — recurse into its children
+                const innerChildren = obj[tagName];
+                if (Array.isArray(innerChildren)) {
+                    result += this.extractOrderedContent(innerChildren, ctx);
+                }
+            }
+        }
+        return result;
+    }
+    /**
+     * Extract text content and placeholders from ordered children.
+     * Returns both the text (with placeholder markers) and the placeholder array.
      */
     extractContentWithPlaceholders(element) {
-        const ctx = this.createPlaceholderContext();
-        const text = this.extractTextWithPlaceholders(element, ctx);
-        return { text, placeholders: ctx.placeholders };
+        // This public method is kept for backward compatibility but only works
+        // correctly with preserveOrder: false parsed elements (no inline elements).
+        // For correct extraction, use extractOrderedContent with ordered children.
+        const ctx = { placeholders: [], counter: 0 };
+        if (Array.isArray(element)) {
+            return { text: this.extractOrderedContent(element, ctx), placeholders: ctx.placeholders };
+        }
+        // Fallback for preserveOrder: false elements (no inline element ordering)
+        return { text: this.extractTextContent(element), placeholders: [] };
     }
     /**
      * Create hash of content for change detection

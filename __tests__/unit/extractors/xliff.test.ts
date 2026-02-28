@@ -95,6 +95,90 @@ describe('XliffExtractor', () => {
     });
   });
 
+  describe('extract XLIFF 1.2 with inline elements', () => {
+    it('should extract <x> inline elements as {{marker}} placeholders', () => {
+      const fixturePath = path.join(
+        __dirname,
+        '../../fixtures/xliff-1.2/messages-with-placeholders.xliff'
+      );
+      const content = fs.readFileSync(fixturePath, 'utf-8');
+
+      const result = extractor.extract(fixturePath, content, 'de');
+
+      const simplePh = result.units.find(u => u.id === 'simple_ph');
+      expect(simplePh).toBeDefined();
+      expect(simplePh?.source).toBe('Click {{PH}} to continue');
+      expect(simplePh?.metadata.placeholders).toBeDefined();
+      expect(simplePh?.metadata.placeholders).toHaveLength(1);
+      expect(simplePh?.metadata.placeholders![0].marker).toBe('{{PH}}');
+      expect(simplePh?.metadata.placeholders![0].tagName).toBe('x');
+      expect(simplePh?.metadata.placeholders![0].attributes.id).toBe('PH');
+    });
+
+    it('should extract INTERPOLATION placeholder with metadata', () => {
+      const fixturePath = path.join(
+        __dirname,
+        '../../fixtures/xliff-1.2/messages-with-placeholders.xliff'
+      );
+      const content = fs.readFileSync(fixturePath, 'utf-8');
+
+      const result = extractor.extract(fixturePath, content, 'de');
+
+      const interpUnit = result.units.find(u => u.id === 'interpolation');
+      expect(interpUnit).toBeDefined();
+      expect(interpUnit?.source).toBe('Hello {{INTERPOLATION}}, welcome!');
+      expect(interpUnit?.metadata.placeholders).toHaveLength(1);
+      expect(interpUnit?.metadata.placeholders![0].tagName).toBe('x');
+    });
+
+    it('should extract multiple inline elements as separate placeholders', () => {
+      const fixturePath = path.join(
+        __dirname,
+        '../../fixtures/xliff-1.2/messages-with-placeholders.xliff'
+      );
+      const content = fs.readFileSync(fixturePath, 'utf-8');
+
+      const result = extractor.extract(fixturePath, content, 'de');
+
+      const multiUnit = result.units.find(u => u.id === 'multiple_ph');
+      expect(multiUnit).toBeDefined();
+      expect(multiUnit?.source).toContain('{{START_TAG_SPAN}}');
+      expect(multiUnit?.source).toContain('{{CLOSE_TAG_SPAN}}');
+      expect(multiUnit?.metadata.placeholders).toBeDefined();
+      expect(multiUnit?.metadata.placeholders!.length).toBe(4);
+    });
+
+    it('should handle units without inline elements normally', () => {
+      const fixturePath = path.join(
+        __dirname,
+        '../../fixtures/xliff-1.2/messages-with-placeholders.xliff'
+      );
+      const content = fs.readFileSync(fixturePath, 'utf-8');
+
+      const result = extractor.extract(fixturePath, content, 'de');
+
+      const plainUnit = result.units.find(u => u.id === 'no_placeholders');
+      expect(plainUnit).toBeDefined();
+      expect(plainUnit?.source).toBe('Simple text without placeholders');
+      expect(plainUnit?.metadata.placeholders).toBeUndefined();
+    });
+
+    it('should extract placeholders from existing targets', () => {
+      const fixturePath = path.join(
+        __dirname,
+        '../../fixtures/xliff-1.2/messages-with-placeholders.xliff'
+      );
+      const content = fs.readFileSync(fixturePath, 'utf-8');
+
+      const result = extractor.extract(fixturePath, content, 'de');
+
+      const targetUnit = result.units.find(u => u.id === 'with_existing_target');
+      expect(targetUnit).toBeDefined();
+      expect(targetUnit?.target).toContain('{{PH}}');
+      expect(targetUnit?.source).toBe('Update {{PH}} now');
+    });
+  });
+
   describe('supported formats', () => {
     it('should support xliff-1.2 format', () => {
       expect(extractor.supportsFormat('xliff-1.2')).toBe(true);
