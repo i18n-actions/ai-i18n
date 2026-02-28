@@ -49760,8 +49760,9 @@ class XliffExtractor extends base_1.BaseExtractor {
             }
             let result = '';
             for (const [key, value] of Object.entries(obj)) {
-                if (key.startsWith('@_'))
+                if (key.startsWith('@_')) {
                     continue;
+                }
                 if (key === '#text') {
                     result += String(value);
                 }
@@ -49787,16 +49788,19 @@ class XliffExtractor extends base_1.BaseExtractor {
         const parsed = this.orderedParser.parse(content);
         const walk = (nodes) => {
             for (const node of nodes) {
-                if (typeof node !== 'object' || node === null)
+                if (typeof node !== 'object' || node === null) {
                     continue;
+                }
                 const obj = node;
                 if (format === 'xliff-1.2' && 'trans-unit' in obj) {
                     const children = obj['trans-unit'];
-                    if (!Array.isArray(children))
+                    if (!Array.isArray(children)) {
                         continue;
+                    }
                     const id = this.getOrderedAttr(obj, '@_id');
-                    if (!id)
+                    if (!id) {
                         continue;
+                    }
                     map.set(id, {
                         source: this.getOrderedElementChildren(children, 'source'),
                         target: this.getOrderedElementChildren(children, 'target'),
@@ -49804,11 +49808,13 @@ class XliffExtractor extends base_1.BaseExtractor {
                 }
                 else if (format === 'xliff-2.0' && 'unit' in obj) {
                     const unitChildren = obj['unit'];
-                    if (!Array.isArray(unitChildren))
+                    if (!Array.isArray(unitChildren)) {
                         continue;
+                    }
                     const id = this.getOrderedAttr(obj, '@_id');
-                    if (!id)
+                    if (!id) {
                         continue;
+                    }
                     const segmentChildren = this.getOrderedElementChildren(unitChildren, 'segment');
                     map.set(id, {
                         source: this.getOrderedElementChildren(segmentChildren, 'source'),
@@ -49816,8 +49822,9 @@ class XliffExtractor extends base_1.BaseExtractor {
                     });
                 }
                 for (const value of Object.values(obj)) {
-                    if (Array.isArray(value))
+                    if (Array.isArray(value)) {
                         walk(value);
+                    }
                 }
             }
         };
@@ -49836,7 +49843,9 @@ class XliffExtractor extends base_1.BaseExtractor {
      */
     getOrderedElementChildren(children, elementName) {
         for (const child of children) {
-            if (typeof child === 'object' && child !== null && elementName in child) {
+            if (typeof child === 'object' &&
+                child !== null &&
+                elementName in child) {
                 const el = child[elementName];
                 return Array.isArray(el) ? el : [];
             }
@@ -49850,8 +49859,9 @@ class XliffExtractor extends base_1.BaseExtractor {
     extractOrderedContent(children, ctx) {
         let result = '';
         for (const node of children) {
-            if (typeof node !== 'object' || node === null)
+            if (typeof node !== 'object' || node === null) {
                 continue;
+            }
             const obj = node;
             if ('#text' in obj) {
                 result += String(obj['#text']);
@@ -49859,8 +49869,9 @@ class XliffExtractor extends base_1.BaseExtractor {
             }
             // Find tag name (key that isn't ':@' or '#text')
             const tagName = Object.keys(obj).find(k => k !== ':@' && k !== '#text');
-            if (!tagName)
+            if (!tagName) {
                 continue;
+            }
             if (XliffExtractor.PLACEHOLDER_TAGS.has(tagName)) {
                 const attrs = obj[':@'];
                 const attributes = {};
