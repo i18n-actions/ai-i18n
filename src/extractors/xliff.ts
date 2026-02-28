@@ -420,7 +420,9 @@ export class XliffExtractor extends BaseExtractor {
       }
       let result = '';
       for (const [key, value] of Object.entries(obj)) {
-        if (key.startsWith('@_')) continue;
+        if (key.startsWith('@_')) {
+          continue;
+        }
         if (key === '#text') {
           result += String(value);
         } else if (Array.isArray(value)) {
@@ -449,23 +451,33 @@ export class XliffExtractor extends BaseExtractor {
 
     const walk = (nodes: unknown[]): void => {
       for (const node of nodes) {
-        if (typeof node !== 'object' || node === null) continue;
+        if (typeof node !== 'object' || node === null) {
+          continue;
+        }
         const obj = node as Record<string, unknown>;
 
         if (format === 'xliff-1.2' && 'trans-unit' in obj) {
           const children = obj['trans-unit'] as unknown[];
-          if (!Array.isArray(children)) continue;
+          if (!Array.isArray(children)) {
+            continue;
+          }
           const id = this.getOrderedAttr(obj, '@_id');
-          if (!id) continue;
+          if (!id) {
+            continue;
+          }
           map.set(id, {
             source: this.getOrderedElementChildren(children, 'source'),
             target: this.getOrderedElementChildren(children, 'target'),
           });
         } else if (format === 'xliff-2.0' && 'unit' in obj) {
           const unitChildren = obj['unit'] as unknown[];
-          if (!Array.isArray(unitChildren)) continue;
+          if (!Array.isArray(unitChildren)) {
+            continue;
+          }
           const id = this.getOrderedAttr(obj, '@_id');
-          if (!id) continue;
+          if (!id) {
+            continue;
+          }
           const segmentChildren = this.getOrderedElementChildren(unitChildren, 'segment');
           map.set(id, {
             source: this.getOrderedElementChildren(segmentChildren, 'source'),
@@ -474,7 +486,9 @@ export class XliffExtractor extends BaseExtractor {
         }
 
         for (const value of Object.values(obj)) {
-          if (Array.isArray(value)) walk(value);
+          if (Array.isArray(value)) {
+            walk(value);
+          }
         }
       }
     };
@@ -496,7 +510,11 @@ export class XliffExtractor extends BaseExtractor {
    */
   private getOrderedElementChildren(children: unknown[], elementName: string): unknown[] {
     for (const child of children) {
-      if (typeof child === 'object' && child !== null && elementName in (child as Record<string, unknown>)) {
+      if (
+        typeof child === 'object' &&
+        child !== null &&
+        elementName in (child as Record<string, unknown>)
+      ) {
         const el = (child as Record<string, unknown>)[elementName];
         return Array.isArray(el) ? el : [];
       }
@@ -514,7 +532,9 @@ export class XliffExtractor extends BaseExtractor {
   ): string {
     let result = '';
     for (const node of children) {
-      if (typeof node !== 'object' || node === null) continue;
+      if (typeof node !== 'object' || node === null) {
+        continue;
+      }
       const obj = node as Record<string, unknown>;
 
       if ('#text' in obj) {
@@ -524,7 +544,9 @@ export class XliffExtractor extends BaseExtractor {
 
       // Find tag name (key that isn't ':@' or '#text')
       const tagName = Object.keys(obj).find(k => k !== ':@' && k !== '#text');
-      if (!tagName) continue;
+      if (!tagName) {
+        continue;
+      }
 
       if (XliffExtractor.PLACEHOLDER_TAGS.has(tagName)) {
         const attrs = obj[':@'] as Record<string, unknown> | undefined;
