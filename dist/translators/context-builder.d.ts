@@ -48,6 +48,9 @@ export declare function findMissingPlaceholders(source: string, translation: str
 /**
  * Build a targeted retry prompt that shows the failed translations and
  * explicitly names the placeholders that were dropped.
+ *
+ * The prompt explains the semantic purpose of placeholders so the LLM
+ * understands WHY they must be kept — not just that they must be.
  */
 export declare function buildPlaceholderRetryPrompt(units: Array<{
     id: string;

@@ -254,20 +254,34 @@ export function findMissingPlaceholders(source: string, translation: string): st
 /**
  * Build a targeted retry prompt that shows the failed translations and
  * explicitly names the placeholders that were dropped.
+ *
+ * The prompt explains the semantic purpose of placeholders so the LLM
+ * understands WHY they must be kept — not just that they must be.
  */
 export function buildPlaceholderRetryPrompt(
   units: Array<{ id: string; source: string; brokenTarget: string; missing: string[] }>,
   sourceLanguage: string,
   targetLanguage: string
 ): string {
-  let prompt = `Some translations from ${sourceLanguage} to ${targetLanguage} are missing required placeholders.
-Re-translate ONLY the units listed below. Every placeholder shown in the "Missing placeholders" list MUST appear in your translation exactly as written.\n\n`;
+  let prompt = `IMPORTANT: Some of your translations are missing required placeholders.
+
+Placeholders like {{PH}}, {{INTERPOLATION}}, {{0}}, and {{variableName}} are runtime variables
+that get replaced with actual values (numbers, names, counts, etc.) when the application runs.
+They are NOT template markers to be removed — they MUST appear in the translated output at the
+appropriate position for the target language.
+
+Example: "{{PH}} Critical" in ${sourceLanguage} should become "{{PH}} Kritisch" in ${targetLanguage}.
+At runtime, {{PH}} is replaced by a number, producing "42 Kritisch".
+If you omit {{PH}}, the number disappears from the UI entirely.
+
+Re-translate ONLY the units listed below. Every placeholder in the "Missing" list MUST appear
+in your translation exactly as written (same spelling, same braces).\n\n`;
 
   for (const unit of units) {
     prompt += `ID: ${unit.id}\n`;
     prompt += `Source: ${unit.source}\n`;
-    prompt += `Your previous translation: ${unit.brokenTarget}\n`;
-    prompt += `Missing placeholders: ${unit.missing.join(', ')}\n\n`;
+    prompt += `Your previous (broken) translation: ${unit.brokenTarget}\n`;
+    prompt += `Missing placeholders that MUST be in your translation: ${unit.missing.join(', ')}\n\n`;
   }
 
   prompt += `Respond with JSON containing all translations:
