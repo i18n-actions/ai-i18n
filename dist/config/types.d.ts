@@ -52,6 +52,7 @@ export interface TranslationConfig {
     context?: string;
     preserveFormatting: boolean;
     preservePlaceholders: boolean;
+    glossaryFile?: string;
 }
 /**
  * Git operation configuration
@@ -109,6 +110,7 @@ export interface ActionInputs {
     ollamaUrl?: string;
     dryRun: string;
     context?: string;
+    glossaryFile?: string;
 }
 /**
  * Configuration file structure (.i18n-translate.yml)
@@ -129,6 +131,7 @@ export interface ConfigFile {
         context?: string;
         preserveFormatting?: boolean;
         preservePlaceholders?: boolean;
+        glossaryFile?: string;
     };
     git?: {
         enabled?: boolean;

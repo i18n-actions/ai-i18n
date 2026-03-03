@@ -19,7 +19,7 @@ import { DEFAULT_CONFIG } from './types';
  * Parse YAML content (simple implementation for basic structure)
  * For production, consider using a proper YAML parser like js-yaml
  */
-function parseYaml(content: string): Record<string, unknown> {
+export function parseYaml(content: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = content.split('\n');
   const stack: Array<{ obj: Record<string, unknown>; indent: number }> = [
@@ -58,8 +58,13 @@ function parseYaml(content: string): Record<string, unknown> {
       continue;
     }
 
-    const key = trimmedLine.slice(0, colonIndex).trim();
+    let key = trimmedLine.slice(0, colonIndex).trim();
     const valueStr = trimmedLine.slice(colonIndex + 1).trim();
+
+    // Strip surrounding quotes from key
+    if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+      key = key.slice(1, -1);
+    }
 
     // Pop stack until we find the right parent
     while (stack.length > 1 && (stack[stack.length - 1]?.indent ?? 0) >= indent) {
@@ -175,6 +180,7 @@ export function getActionInputs(): ActionInputs {
     ollamaUrl: core.getInput('ollama-url') || undefined,
     dryRun: core.getInput('dry-run') || 'false',
     context: core.getInput('context') || undefined,
+    glossaryFile: core.getInput('glossary-file') || undefined,
   };
 }
 
@@ -267,6 +273,7 @@ export function loadConfig(inputs?: ActionInputs): ActionConfig {
       preservePlaceholders:
         fileConfig?.translation?.preservePlaceholders ??
         DEFAULT_CONFIG.translation.preservePlaceholders,
+      glossaryFile: actionInputs.glossaryFile ?? fileConfig?.translation?.glossaryFile,
     },
     git: {
       enabled:

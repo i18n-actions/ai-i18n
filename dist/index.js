@@ -48118,6 +48118,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.parseYaml = parseYaml;
 exports.loadConfigFile = loadConfigFile;
 exports.getActionInputs = getActionInputs;
 exports.loadConfig = loadConfig;
@@ -48167,8 +48168,12 @@ function parseYaml(content) {
         if (colonIndex === -1) {
             continue;
         }
-        const key = trimmedLine.slice(0, colonIndex).trim();
+        let key = trimmedLine.slice(0, colonIndex).trim();
         const valueStr = trimmedLine.slice(colonIndex + 1).trim();
+        // Strip surrounding quotes from key
+        if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+            key = key.slice(1, -1);
+        }
         // Pop stack until we find the right parent
         while (stack.length > 1 && (stack[stack.length - 1]?.indent ?? 0) >= indent) {
             stack.pop();
@@ -48269,6 +48274,7 @@ function getActionInputs() {
         ollamaUrl: core.getInput('ollama-url') || undefined,
         dryRun: core.getInput('dry-run') || 'false',
         context: core.getInput('context') || undefined,
+        glossaryFile: core.getInput('glossary-file') || undefined,
     };
 }
 /**
@@ -48344,6 +48350,7 @@ function loadConfig(inputs) {
                 types_1.DEFAULT_CONFIG.translation.preserveFormatting,
             preservePlaceholders: fileConfig?.translation?.preservePlaceholders ??
                 types_1.DEFAULT_CONFIG.translation.preservePlaceholders,
+            glossaryFile: actionInputs.glossaryFile ?? fileConfig?.translation?.glossaryFile,
         },
         git: {
             enabled: actionInputs.commit === 'true' && (fileConfig?.git?.enabled ?? types_1.DEFAULT_CONFIG.git.enabled),
@@ -48454,6 +48461,7 @@ exports.translationConfigSchema = zod_1.z.object({
     context: zod_1.z.string().max(2000).optional(),
     preserveFormatting: zod_1.z.boolean().default(true),
     preservePlaceholders: zod_1.z.boolean().default(true),
+    glossaryFile: zod_1.z.string().optional(),
 });
 /**
  * Git configuration schema
@@ -48507,6 +48515,7 @@ exports.configFileSchema = zod_1.z.object({
         context: zod_1.z.string().max(2000).optional(),
         preserveFormatting: zod_1.z.boolean().optional(),
         preservePlaceholders: zod_1.z.boolean().optional(),
+        glossaryFile: zod_1.z.string().optional(),
     })
         .optional(),
     git: zod_1.z
@@ -52082,11 +52091,14 @@ async function runPipeline(config, reportBuilder) {
     // Snapshot hash store before processing — all languages should diff against
     // the same baseline, not see updates from earlier languages
     const hashStoreSnapshot = JSON.parse(JSON.stringify(hashStore));
+    // Load glossary once for all languages
+    const glossary = loadGlossary(config.translation.glossaryFile);
     // Process each target language
     for (const targetLanguage of config.files.targetLanguages) {
         logger_1.logger.group(`Translating to ${targetLanguage}`);
+        const languageGlossary = glossary[targetLanguage];
         try {
-            const files = await processLanguage(config, targetLanguage, orchestrator, hashStoreSnapshot, hashStore, reportBuilder);
+            const files = await processLanguage(config, targetLanguage, orchestrator, hashStoreSnapshot, hashStore, reportBuilder, languageGlossary);
             updatedFiles.push(...files);
         }
         catch (error) {
@@ -52109,7 +52121,7 @@ async function runPipeline(config, reportBuilder) {
 /**
  * Process a single target language
  */
-async function processLanguage(config, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder) {
+async function processLanguage(config, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder, glossary) {
     const updatedFiles = [];
     // Extract translation units from files
     const extractResults = await (0, factory_1.extractFromPattern)(config.files.pattern, targetLanguage, {
@@ -52124,7 +52136,7 @@ async function processLanguage(config, targetLanguage, orchestrator, diffHashSto
     // Process each file
     for (const extractResult of extractResults) {
         try {
-            const outputFilePath = await processFile(config, extractResult, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder);
+            const outputFilePath = await processFile(config, extractResult, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder, glossary);
             if (outputFilePath) {
                 updatedFiles.push(outputFilePath);
             }
@@ -52139,7 +52151,7 @@ async function processLanguage(config, targetLanguage, orchestrator, diffHashSto
 /**
  * Process a single file
  */
-async function processFile(config, extractResult, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder) {
+async function processFile(config, extractResult, targetLanguage, orchestrator, diffHashStore, updateHashStore, reportBuilder, glossary) {
     logger_1.logger.info(`Processing ${extractResult.filePath}`);
     // Generate the language-specific output file path
     const outputFilePath = (0, output_path_1.getOutputFilePath)(extractResult.filePath, targetLanguage, config.files.sourceLanguage);
@@ -52147,8 +52159,39 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
     // Use relative path for portable hash store keys
     const relativeFilePath = toRelativePath(extractResult.filePath);
     const diffResult = (0, differ_1.diffAgainstStore)(relativeFilePath, extractResult.units, diffHashStore);
-    // Get units that need translation
-    const unitsToTranslate = (0, differ_1.getUnitsNeedingTranslation)(diffResult);
+    // Get units that need translation (new or modified)
+    let unitsToTranslate = (0, differ_1.getUnitsNeedingTranslation)(diffResult);
+    // Read target file early — needed for both reviewed-unit filtering and merge step
+    const absoluteOutputPath = path.resolve(outputFilePath);
+    let existingExtract = null;
+    if (fs.existsSync(absoluteOutputPath)) {
+        existingExtract = (0, factory_1.extractFromFile)(outputFilePath, targetLanguage, {
+            format: config.files.format === 'auto' ? undefined : config.files.format,
+        });
+        // Filter out reviewed units that are "new" (not modified)
+        // If the source text changed (modified), always retranslate regardless of review state
+        const reviewedIds = new Set(existingExtract.units.filter(isReviewedUnit).map(u => u.id));
+        if (reviewedIds.size > 0) {
+            const changeTypeMap = new Map(diffResult.entries.map(e => [e.unit.id, e.changeType]));
+            const beforeCount = unitsToTranslate.length;
+            unitsToTranslate = unitsToTranslate.filter(unit => {
+                const changeType = changeTypeMap.get(unit.id);
+                // Always retranslate modified units (source text changed)
+                if (changeType === 'modified') {
+                    return true;
+                }
+                // Skip new units that are already reviewed in the target
+                if (changeType === 'new' && reviewedIds.has(unit.id)) {
+                    return false;
+                }
+                return true;
+            });
+            const skippedReviewed = beforeCount - unitsToTranslate.length;
+            if (skippedReviewed > 0) {
+                logger_1.logger.info(`Skipped ${skippedReviewed} reviewed unit(s) that don't need retranslation`);
+            }
+        }
+    }
     if (unitsToTranslate.length === 0) {
         logger_1.logger.info(`No changes detected in ${extractResult.filePath}`);
         reportBuilder.addFileReport({
@@ -52170,6 +52213,7 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
         context: config.translation.context,
         preserveFormatting: config.translation.preserveFormatting,
         preservePlaceholders: config.translation.preservePlaceholders,
+        glossary,
     };
     // Translate
     const response = await orchestrator.translate(request);
@@ -52186,13 +52230,9 @@ async function processFile(config, extractResult, targetLanguage, orchestrator, 
     logger_1.logger.info(`Units with translations after merge: ${unitsWithTargets}/${updatedUnits.length}`);
     // Write to language-specific output file if not dry run
     if (!config.dryRun) {
-        const absoluteOutputPath = path.resolve(outputFilePath);
-        if (fs.existsSync(absoluteOutputPath)) {
-            // Output file exists - read it and merge translations
+        if (existingExtract) {
+            // Output file exists - merge translations with existing content
             const existingContent = fs.readFileSync(absoluteOutputPath, 'utf-8');
-            const existingExtract = (0, factory_1.extractFromFile)(outputFilePath, targetLanguage, {
-                format: config.files.format === 'auto' ? undefined : config.files.format,
-            });
             logger_1.logger.info(`Output file exists with ${existingExtract.units.length} units, merging with ${updatedUnits.length} updated units`);
             // Merge new translations with existing content
             const mergedUnits = mergeTranslationUnits(existingExtract.units, updatedUnits);
@@ -52314,6 +52354,60 @@ function saveHashStore(store) {
     catch (error) {
         logger_1.logger.warning(`Failed to save hash store: ${error}`);
     }
+}
+/**
+ * Load glossary file and return parsed per-language glossary map.
+ * Returns an empty object if no glossary file is configured or the file doesn't exist.
+ */
+function loadGlossary(glossaryFile) {
+    if (!glossaryFile) {
+        return {};
+    }
+    const absolutePath = path.resolve(glossaryFile);
+    if (!fs.existsSync(absolutePath)) {
+        logger_1.logger.warning(`Glossary file not found: ${absolutePath}`);
+        return {};
+    }
+    try {
+        const content = fs.readFileSync(absolutePath, 'utf-8');
+        const parsed = (0, loader_1.parseYaml)(content);
+        // Validate structure: top-level keys are language codes, values are Record<string, string>
+        const glossary = {};
+        for (const [lang, entries] of Object.entries(parsed)) {
+            if (typeof entries === 'object' && entries !== null && !Array.isArray(entries)) {
+                const terms = {};
+                for (const [term, translation] of Object.entries(entries)) {
+                    if (typeof translation === 'string') {
+                        terms[term] = translation;
+                    }
+                }
+                if (Object.keys(terms).length > 0) {
+                    glossary[lang] = terms;
+                }
+            }
+        }
+        const langCount = Object.keys(glossary).length;
+        const termCount = Object.values(glossary).reduce((sum, terms) => sum + Object.keys(terms).length, 0);
+        logger_1.logger.info(`Loaded glossary: ${termCount} term(s) across ${langCount} language(s)`);
+        return glossary;
+    }
+    catch (error) {
+        logger_1.logger.warning(`Failed to parse glossary file: ${error instanceof Error ? error.message : String(error)}`);
+        return {};
+    }
+}
+/**
+ * Check whether a translation unit has been reviewed/finalized by a human translator.
+ */
+function isReviewedUnit(unit) {
+    const state = unit.metadata.state?.toLowerCase();
+    if (state === 'reviewed' || state === 'final') {
+        return true;
+    }
+    if (unit.metadata.approved === true) {
+        return true;
+    }
+    return false;
 }
 // Run the action
 run().catch(error => {
@@ -53723,6 +53817,7 @@ class AnthropicTranslator extends base_1.BaseTranslator {
             userContext: request.context,
             preserveFormatting: request.preserveFormatting,
             preservePlaceholders: request.preservePlaceholders,
+            glossary: request.glossary,
         });
         const userPrompt = request.customUserPrompt ??
             (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
@@ -53881,6 +53976,7 @@ class OllamaTranslator extends base_1.BaseTranslator {
             userContext: request.context,
             preserveFormatting: request.preserveFormatting,
             preservePlaceholders: request.preservePlaceholders,
+            glossary: request.glossary,
         });
         const userPrompt = request.customUserPrompt ??
             (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {
@@ -54085,6 +54181,7 @@ class OpenAITranslator extends base_1.BaseTranslator {
             userContext: request.context,
             preserveFormatting: request.preserveFormatting,
             preservePlaceholders: request.preservePlaceholders,
+            glossary: request.glossary,
         });
         const userPrompt = request.customUserPrompt ??
             (0, context_builder_1.buildUserPrompt)(request.units, request.sourceLanguage, request.targetLanguage, {

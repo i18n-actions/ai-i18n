@@ -80,6 +80,11 @@ inputs:
     required: false
     default: ''
 
+  glossary-file:
+    description: 'Path to glossary YAML file for consistent terminology'
+    required: false
+    default: ''
+
 outputs:
   translated-count:
     description: 'Number of strings translated'

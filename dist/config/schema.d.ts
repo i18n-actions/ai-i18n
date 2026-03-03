@@ -62,6 +62,7 @@ export declare const translationConfigSchema: z.ZodObject<{
     context: z.ZodOptional<z.ZodString>;
     preserveFormatting: z.ZodDefault<z.ZodBoolean>;
     preservePlaceholders: z.ZodDefault<z.ZodBoolean>;
+    glossaryFile: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
     batchSize: number;
     maxRetries: number;
@@ -70,6 +71,7 @@ export declare const translationConfigSchema: z.ZodObject<{
     preservePlaceholders: boolean;
     rateLimitPerMinute?: number | undefined;
     context?: string | undefined;
+    glossaryFile?: string | undefined;
 }, {
     batchSize?: number | undefined;
     rateLimitPerMinute?: number | undefined;
@@ -78,6 +80,7 @@ export declare const translationConfigSchema: z.ZodObject<{
     context?: string | undefined;
     preserveFormatting?: boolean | undefined;
     preservePlaceholders?: boolean | undefined;
+    glossaryFile?: string | undefined;
 }>;
 /**
  * Git configuration schema
@@ -171,6 +174,7 @@ export declare const actionConfigSchema: z.ZodObject<{
         context: z.ZodOptional<z.ZodString>;
         preserveFormatting: z.ZodDefault<z.ZodBoolean>;
         preservePlaceholders: z.ZodDefault<z.ZodBoolean>;
+        glossaryFile: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         batchSize: number;
         maxRetries: number;
@@ -179,6 +183,7 @@ export declare const actionConfigSchema: z.ZodObject<{
         preservePlaceholders: boolean;
         rateLimitPerMinute?: number | undefined;
         context?: string | undefined;
+        glossaryFile?: string | undefined;
     }, {
         batchSize?: number | undefined;
         rateLimitPerMinute?: number | undefined;
@@ -187,6 +192,7 @@ export declare const actionConfigSchema: z.ZodObject<{
         context?: string | undefined;
         preserveFormatting?: boolean | undefined;
         preservePlaceholders?: boolean | undefined;
+        glossaryFile?: string | undefined;
     }>;
     git: z.ZodObject<{
         enabled: z.ZodDefault<z.ZodBoolean>;
@@ -228,14 +234,6 @@ export declare const actionConfigSchema: z.ZodObject<{
     }>;
     dryRun: z.ZodDefault<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
-    provider: {
-        provider: "anthropic" | "openai" | "ollama";
-        model?: string | undefined;
-        baseUrl?: string | undefined;
-        maxTokens?: number | undefined;
-        temperature?: number | undefined;
-        apiKey?: string | undefined;
-    };
     translation: {
         batchSize: number;
         maxRetries: number;
@@ -244,6 +242,15 @@ export declare const actionConfigSchema: z.ZodObject<{
         preservePlaceholders: boolean;
         rateLimitPerMinute?: number | undefined;
         context?: string | undefined;
+        glossaryFile?: string | undefined;
+    };
+    provider: {
+        provider: "anthropic" | "openai" | "ollama";
+        model?: string | undefined;
+        baseUrl?: string | undefined;
+        maxTokens?: number | undefined;
+        temperature?: number | undefined;
+        apiKey?: string | undefined;
     };
     git: {
         enabled: boolean;
@@ -261,14 +268,6 @@ export declare const actionConfigSchema: z.ZodObject<{
     };
     dryRun: boolean;
 }, {
-    provider: {
-        provider: "anthropic" | "openai" | "ollama";
-        model?: string | undefined;
-        baseUrl?: string | undefined;
-        maxTokens?: number | undefined;
-        temperature?: number | undefined;
-        apiKey?: string | undefined;
-    };
     translation: {
         batchSize?: number | undefined;
         rateLimitPerMinute?: number | undefined;
@@ -277,6 +276,15 @@ export declare const actionConfigSchema: z.ZodObject<{
         context?: string | undefined;
         preserveFormatting?: boolean | undefined;
         preservePlaceholders?: boolean | undefined;
+        glossaryFile?: string | undefined;
+    };
+    provider: {
+        provider: "anthropic" | "openai" | "ollama";
+        model?: string | undefined;
+        baseUrl?: string | undefined;
+        maxTokens?: number | undefined;
+        temperature?: number | undefined;
+        apiKey?: string | undefined;
     };
     git: {
         enabled?: boolean | undefined;
@@ -305,14 +313,14 @@ export declare const configFileSchema: z.ZodObject<{
         maxTokens: z.ZodOptional<z.ZodNumber>;
         temperature: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
         model?: string | undefined;
+        name?: "anthropic" | "openai" | "ollama" | undefined;
         baseUrl?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
     }, {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
         model?: string | undefined;
+        name?: "anthropic" | "openai" | "ollama" | undefined;
         baseUrl?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
@@ -325,6 +333,7 @@ export declare const configFileSchema: z.ZodObject<{
         context: z.ZodOptional<z.ZodString>;
         preserveFormatting: z.ZodOptional<z.ZodBoolean>;
         preservePlaceholders: z.ZodOptional<z.ZodBoolean>;
+        glossaryFile: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
         batchSize?: number | undefined;
         rateLimitPerMinute?: number | undefined;
@@ -333,6 +342,7 @@ export declare const configFileSchema: z.ZodObject<{
         context?: string | undefined;
         preserveFormatting?: boolean | undefined;
         preservePlaceholders?: boolean | undefined;
+        glossaryFile?: string | undefined;
     }, {
         batchSize?: number | undefined;
         rateLimitPerMinute?: number | undefined;
@@ -341,6 +351,7 @@ export declare const configFileSchema: z.ZodObject<{
         context?: string | undefined;
         preserveFormatting?: boolean | undefined;
         preservePlaceholders?: boolean | undefined;
+        glossaryFile?: string | undefined;
     }>>;
     git: z.ZodOptional<z.ZodObject<{
         enabled: z.ZodOptional<z.ZodBoolean>;
@@ -382,13 +393,6 @@ export declare const configFileSchema: z.ZodObject<{
     }>>;
     dryRun: z.ZodOptional<z.ZodBoolean>;
 }, "strip", z.ZodTypeAny, {
-    provider?: {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
-        model?: string | undefined;
-        baseUrl?: string | undefined;
-        maxTokens?: number | undefined;
-        temperature?: number | undefined;
-    } | undefined;
     translation?: {
         batchSize?: number | undefined;
         rateLimitPerMinute?: number | undefined;
@@ -397,6 +401,14 @@ export declare const configFileSchema: z.ZodObject<{
         context?: string | undefined;
         preserveFormatting?: boolean | undefined;
         preservePlaceholders?: boolean | undefined;
+        glossaryFile?: string | undefined;
+    } | undefined;
+    provider?: {
+        model?: string | undefined;
+        name?: "anthropic" | "openai" | "ollama" | undefined;
+        baseUrl?: string | undefined;
+        maxTokens?: number | undefined;
+        temperature?: number | undefined;
     } | undefined;
     git?: {
         enabled?: boolean | undefined;
@@ -414,13 +426,6 @@ export declare const configFileSchema: z.ZodObject<{
     } | undefined;
     dryRun?: boolean | undefined;
 }, {
-    provider?: {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
-        model?: string | undefined;
-        baseUrl?: string | undefined;
-        maxTokens?: number | undefined;
-        temperature?: number | undefined;
-    } | undefined;
     translation?: {
         batchSize?: number | undefined;
         rateLimitPerMinute?: number | undefined;
@@ -429,6 +434,14 @@ export declare const configFileSchema: z.ZodObject<{
         context?: string | undefined;
         preserveFormatting?: boolean | undefined;
         preservePlaceholders?: boolean | undefined;
+        glossaryFile?: string | undefined;
+    } | undefined;
+    provider?: {
+        model?: string | undefined;
+        name?: "anthropic" | "openai" | "ollama" | undefined;
+        baseUrl?: string | undefined;
+        maxTokens?: number | undefined;
+        temperature?: number | undefined;
     } | undefined;
     git?: {
         enabled?: boolean | undefined;

@@ -67,6 +67,7 @@ export const translationConfigSchema = z.object({
   context: z.string().max(2000).optional(),
   preserveFormatting: z.boolean().default(true),
   preservePlaceholders: z.boolean().default(true),
+  glossaryFile: z.string().optional(),
 });
 
 /**
@@ -124,6 +125,7 @@ export const configFileSchema = z.object({
       context: z.string().max(2000).optional(),
       preserveFormatting: z.boolean().optional(),
       preservePlaceholders: z.boolean().optional(),
+      glossaryFile: z.string().optional(),
     })
     .optional(),
   git: z

@@ -100,6 +100,7 @@ export class OllamaTranslator extends BaseTranslator {
       userContext: request.context,
       preserveFormatting: request.preserveFormatting,
       preservePlaceholders: request.preservePlaceholders,
+      glossary: request.glossary,
     });
 
     const userPrompt =

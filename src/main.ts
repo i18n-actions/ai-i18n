@@ -1,7 +1,7 @@
 import * as core from '@actions/core';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadConfig } from './config/loader';
+import { loadConfig, parseYaml } from './config/loader';
 import type { ActionConfig } from './config/types';
 import type { TranslationUnit, ExtractResult, TranslationRequest } from './types/translation';
 import { extractFromPattern, extractFromFile } from './extractors/factory';
@@ -131,9 +131,14 @@ async function runPipeline(
   // the same baseline, not see updates from earlier languages
   const hashStoreSnapshot = JSON.parse(JSON.stringify(hashStore)) as typeof hashStore;
 
+  // Load glossary once for all languages
+  const glossary = loadGlossary(config.translation.glossaryFile);
+
   // Process each target language
   for (const targetLanguage of config.files.targetLanguages) {
     logger.group(`Translating to ${targetLanguage}`);
+
+    const languageGlossary = glossary[targetLanguage];
 
     try {
       const files = await processLanguage(
@@ -142,7 +147,8 @@ async function runPipeline(
         orchestrator,
         hashStoreSnapshot,
         hashStore,
-        reportBuilder
+        reportBuilder,
+        languageGlossary
       );
       updatedFiles.push(...files);
     } catch (error) {
@@ -182,7 +188,8 @@ async function processLanguage(
   orchestrator: ReturnType<typeof createOrchestrator>,
   diffHashStore: ReturnType<typeof createHashStore>,
   updateHashStore: ReturnType<typeof createHashStore>,
-  reportBuilder: ReportBuilder
+  reportBuilder: ReportBuilder,
+  glossary?: Record<string, string>
 ): Promise<string[]> {
   const updatedFiles: string[] = [];
 
@@ -209,7 +216,8 @@ async function processLanguage(
         orchestrator,
         diffHashStore,
         updateHashStore,
-        reportBuilder
+        reportBuilder,
+        glossary
       );
 
       if (outputFilePath) {
@@ -241,7 +249,8 @@ async function processFile(
   orchestrator: ReturnType<typeof createOrchestrator>,
   diffHashStore: ReturnType<typeof createHashStore>,
   updateHashStore: ReturnType<typeof createHashStore>,
-  reportBuilder: ReportBuilder
+  reportBuilder: ReportBuilder,
+  glossary?: Record<string, string>
 ): Promise<string | null> {
   logger.info(`Processing ${extractResult.filePath}`);
 
@@ -257,8 +266,51 @@ async function processFile(
   const relativeFilePath = toRelativePath(extractResult.filePath);
   const diffResult = diffAgainstStore(relativeFilePath, extractResult.units, diffHashStore);
 
-  // Get units that need translation
-  const unitsToTranslate = getUnitsNeedingTranslation(diffResult);
+  // Get units that need translation (new or modified)
+  let unitsToTranslate = getUnitsNeedingTranslation(diffResult);
+
+  // Read target file early — needed for both reviewed-unit filtering and merge step
+  const absoluteOutputPath = path.resolve(outputFilePath);
+  let existingExtract: ExtractResult | null = null;
+
+  if (fs.existsSync(absoluteOutputPath)) {
+    existingExtract = extractFromFile(outputFilePath, targetLanguage, {
+      format: config.files.format === 'auto' ? undefined : config.files.format,
+    });
+
+    // Filter out reviewed units that are "new" (not modified)
+    // If the source text changed (modified), always retranslate regardless of review state
+    const reviewedIds = new Set(
+      existingExtract.units.filter(isReviewedUnit).map(u => u.id)
+    );
+
+    if (reviewedIds.size > 0) {
+      const changeTypeMap = new Map(
+        diffResult.entries.map(e => [e.unit.id, e.changeType])
+      );
+
+      const beforeCount = unitsToTranslate.length;
+      unitsToTranslate = unitsToTranslate.filter(unit => {
+        const changeType = changeTypeMap.get(unit.id);
+        // Always retranslate modified units (source text changed)
+        if (changeType === 'modified') {
+          return true;
+        }
+        // Skip new units that are already reviewed in the target
+        if (changeType === 'new' && reviewedIds.has(unit.id)) {
+          return false;
+        }
+        return true;
+      });
+
+      const skippedReviewed = beforeCount - unitsToTranslate.length;
+      if (skippedReviewed > 0) {
+        logger.info(
+          `Skipped ${skippedReviewed} reviewed unit(s) that don't need retranslation`
+        );
+      }
+    }
+  }
 
   if (unitsToTranslate.length === 0) {
     logger.info(`No changes detected in ${extractResult.filePath}`);
@@ -283,6 +335,7 @@ async function processFile(
     context: config.translation.context,
     preserveFormatting: config.translation.preserveFormatting,
     preservePlaceholders: config.translation.preservePlaceholders,
+    glossary,
   };
 
   // Translate
@@ -307,14 +360,9 @@ async function processFile(
 
   // Write to language-specific output file if not dry run
   if (!config.dryRun) {
-    const absoluteOutputPath = path.resolve(outputFilePath);
-
-    if (fs.existsSync(absoluteOutputPath)) {
-      // Output file exists - read it and merge translations
+    if (existingExtract) {
+      // Output file exists - merge translations with existing content
       const existingContent = fs.readFileSync(absoluteOutputPath, 'utf-8');
-      const existingExtract = extractFromFile(outputFilePath, targetLanguage, {
-        format: config.files.format === 'auto' ? undefined : config.files.format,
-      });
 
       logger.info(
         `Output file exists with ${existingExtract.units.length} units, merging with ${updatedUnits.length} updated units`
@@ -480,6 +528,72 @@ function saveHashStore(store: ReturnType<typeof createHashStore>): void {
   } catch (error) {
     logger.warning(`Failed to save hash store: ${error}`);
   }
+}
+
+/**
+ * Load glossary file and return parsed per-language glossary map.
+ * Returns an empty object if no glossary file is configured or the file doesn't exist.
+ */
+function loadGlossary(
+  glossaryFile: string | undefined
+): Record<string, Record<string, string>> {
+  if (!glossaryFile) {
+    return {};
+  }
+
+  const absolutePath = path.resolve(glossaryFile);
+  if (!fs.existsSync(absolutePath)) {
+    logger.warning(`Glossary file not found: ${absolutePath}`);
+    return {};
+  }
+
+  try {
+    const content = fs.readFileSync(absolutePath, 'utf-8');
+    const parsed = parseYaml(content);
+
+    // Validate structure: top-level keys are language codes, values are Record<string, string>
+    const glossary: Record<string, Record<string, string>> = {};
+    for (const [lang, entries] of Object.entries(parsed)) {
+      if (typeof entries === 'object' && entries !== null && !Array.isArray(entries)) {
+        const terms: Record<string, string> = {};
+        for (const [term, translation] of Object.entries(entries as Record<string, unknown>)) {
+          if (typeof translation === 'string') {
+            terms[term] = translation;
+          }
+        }
+        if (Object.keys(terms).length > 0) {
+          glossary[lang] = terms;
+        }
+      }
+    }
+
+    const langCount = Object.keys(glossary).length;
+    const termCount = Object.values(glossary).reduce(
+      (sum, terms) => sum + Object.keys(terms).length,
+      0
+    );
+    logger.info(`Loaded glossary: ${termCount} term(s) across ${langCount} language(s)`);
+    return glossary;
+  } catch (error) {
+    logger.warning(
+      `Failed to parse glossary file: ${error instanceof Error ? error.message : String(error)}`
+    );
+    return {};
+  }
+}
+
+/**
+ * Check whether a translation unit has been reviewed/finalized by a human translator.
+ */
+function isReviewedUnit(unit: TranslationUnit): boolean {
+  const state = unit.metadata.state?.toLowerCase();
+  if (state === 'reviewed' || state === 'final') {
+    return true;
+  }
+  if (unit.metadata.approved === true) {
+    return true;
+  }
+  return false;
 }
 
 // Run the action

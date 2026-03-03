@@ -75,6 +75,8 @@ export interface TranslationRequest {
   preservePlaceholders: boolean;
   /** When set, providers use this instead of buildUserPrompt() */
   customUserPrompt?: string;
+  /** Glossary terms for this target language (source term → translated term) */
+  glossary?: Record<string, string>;
 }
 
 /**

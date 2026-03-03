@@ -58,6 +58,7 @@ export interface TranslationConfig {
   context?: string;
   preserveFormatting: boolean;
   preservePlaceholders: boolean;
+  glossaryFile?: string;
 }
 
 /**
@@ -141,6 +142,7 @@ export interface ActionInputs {
   ollamaUrl?: string;
   dryRun: string;
   context?: string;
+  glossaryFile?: string;
 }
 
 /**
@@ -162,6 +164,7 @@ export interface ConfigFile {
     context?: string;
     preserveFormatting?: boolean;
     preservePlaceholders?: boolean;
+    glossaryFile?: string;
   };
   git?: {
     enabled?: boolean;
