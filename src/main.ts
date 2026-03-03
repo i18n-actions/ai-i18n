@@ -280,14 +280,10 @@ async function processFile(
 
     // Filter out reviewed units that are "new" (not modified)
     // If the source text changed (modified), always retranslate regardless of review state
-    const reviewedIds = new Set(
-      existingExtract.units.filter(isReviewedUnit).map(u => u.id)
-    );
+    const reviewedIds = new Set(existingExtract.units.filter(isReviewedUnit).map(u => u.id));
 
     if (reviewedIds.size > 0) {
-      const changeTypeMap = new Map(
-        diffResult.entries.map(e => [e.unit.id, e.changeType])
-      );
+      const changeTypeMap = new Map(diffResult.entries.map(e => [e.unit.id, e.changeType]));
 
       const beforeCount = unitsToTranslate.length;
       unitsToTranslate = unitsToTranslate.filter(unit => {
@@ -305,9 +301,7 @@ async function processFile(
 
       const skippedReviewed = beforeCount - unitsToTranslate.length;
       if (skippedReviewed > 0) {
-        logger.info(
-          `Skipped ${skippedReviewed} reviewed unit(s) that don't need retranslation`
-        );
+        logger.info(`Skipped ${skippedReviewed} reviewed unit(s) that don't need retranslation`);
       }
     }
   }
@@ -534,9 +528,7 @@ function saveHashStore(store: ReturnType<typeof createHashStore>): void {
  * Load glossary file and return parsed per-language glossary map.
  * Returns an empty object if no glossary file is configured or the file doesn't exist.
  */
-function loadGlossary(
-  glossaryFile: string | undefined
-): Record<string, Record<string, string>> {
+function loadGlossary(glossaryFile: string | undefined): Record<string, Record<string, string>> {
   if (!glossaryFile) {
     return {};
   }

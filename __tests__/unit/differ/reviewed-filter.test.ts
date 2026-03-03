@@ -163,10 +163,7 @@ describe('Reviewed Unit Filtering', () => {
     });
 
     it('should not filter when no reviewed units exist', () => {
-      const sourceUnits = [
-        makeUnit('1', 'Hello'),
-        makeUnit('2', 'World'),
-      ];
+      const sourceUnits = [makeUnit('1', 'Hello'), makeUnit('2', 'World')];
 
       const existingTargetUnits = [
         makeUnit('1', 'Hello', { state: 'translated', target: 'Hallo' }),
@@ -190,9 +187,7 @@ describe('Reviewed Unit Filtering', () => {
     it('should handle approved=yes units', () => {
       const sourceUnits = [makeUnit('1', 'Hello')];
 
-      const existingTargetUnits = [
-        makeUnit('1', 'Hello', { approved: true, target: 'Hallo' }),
-      ];
+      const existingTargetUnits = [makeUnit('1', 'Hello', { approved: true, target: 'Hallo' })];
 
       const diffResult: DiffResult = {
         entries: [{ unit: sourceUnits[0], changeType: 'new' }],
@@ -208,9 +203,7 @@ describe('Reviewed Unit Filtering', () => {
     it('should handle state="final" units', () => {
       const sourceUnits = [makeUnit('1', 'Hello')];
 
-      const existingTargetUnits = [
-        makeUnit('1', 'Hello', { state: 'final', target: 'Hallo' }),
-      ];
+      const existingTargetUnits = [makeUnit('1', 'Hello', { state: 'final', target: 'Hallo' })];
 
       const diffResult: DiffResult = {
         entries: [{ unit: sourceUnits[0], changeType: 'new' }],
