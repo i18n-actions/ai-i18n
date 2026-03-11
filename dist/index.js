@@ -54158,7 +54158,7 @@ class OpenAITranslator extends base_1.BaseTranslator {
             // Make a minimal API call to check connectivity
             await client.chat.completions.create({
                 model: this.getModel(),
-                max_tokens: 10,
+                max_completion_tokens: 10,
                 messages: [{ role: 'user', content: 'test' }],
             });
             return true;
@@ -54194,7 +54194,7 @@ class OpenAITranslator extends base_1.BaseTranslator {
             try {
                 return await client.chat.completions.create({
                     model,
-                    max_tokens: this.getMaxTokens(),
+                    max_completion_tokens: this.getMaxTokens(),
                     temperature: this.getTemperature(),
                     response_format: { type: 'json_object' },
                     messages: [
