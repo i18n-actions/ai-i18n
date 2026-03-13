@@ -313,14 +313,14 @@ export declare const configFileSchema: z.ZodObject<{
         maxTokens: z.ZodOptional<z.ZodNumber>;
         temperature: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
-        model?: string | undefined;
         name?: "anthropic" | "openai" | "ollama" | undefined;
+        model?: string | undefined;
         baseUrl?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
     }, {
-        model?: string | undefined;
         name?: "anthropic" | "openai" | "ollama" | undefined;
+        model?: string | undefined;
         baseUrl?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
@@ -404,8 +404,8 @@ export declare const configFileSchema: z.ZodObject<{
         glossaryFile?: string | undefined;
     } | undefined;
     provider?: {
-        model?: string | undefined;
         name?: "anthropic" | "openai" | "ollama" | undefined;
+        model?: string | undefined;
         baseUrl?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
@@ -437,8 +437,8 @@ export declare const configFileSchema: z.ZodObject<{
         glossaryFile?: string | undefined;
     } | undefined;
     provider?: {
-        model?: string | undefined;
         name?: "anthropic" | "openai" | "ollama" | undefined;
+        model?: string | undefined;
         baseUrl?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
