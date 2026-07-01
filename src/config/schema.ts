@@ -4,7 +4,7 @@ import type { FileFormat, Provider } from './types';
 /**
  * Provider enum schema
  */
-export const providerSchema = z.enum(['anthropic', 'openai', 'ollama']);
+export const providerSchema = z.enum(['anthropic', 'openai', 'ollama', 'bedrock']);
 
 /**
  * File format enum schema
@@ -37,6 +37,10 @@ export const providerConfigSchema = z
     baseUrl: z.string().url().optional(),
     maxTokens: z.number().int().positive().max(100000).optional(),
     temperature: z.number().min(0).max(2).optional(),
+    region: z.string().min(1).optional(),
+    accessKeyId: z.string().min(1).optional(),
+    secretAccessKey: z.string().min(1).optional(),
+    sessionToken: z.string().min(1).optional(),
   })
   .refine(
     data => {
@@ -48,11 +52,15 @@ export const providerConfigSchema = z
       if (data.provider === 'ollama' && !data.baseUrl) {
         return false;
       }
+      // Region required for bedrock
+      if (data.provider === 'bedrock' && !data.region) {
+        return false;
+      }
       return true;
     },
     {
       message:
-        'API key is required for anthropic and openai providers. Base URL is required for ollama.',
+        'API key is required for anthropic and openai providers. Base URL is required for ollama. Region is required for bedrock.',
     }
   );
 
@@ -112,6 +120,7 @@ export const configFileSchema = z.object({
       name: providerSchema.optional(),
       model: z.string().min(1).optional(),
       baseUrl: z.string().url().optional(),
+      region: z.string().min(1).optional(),
       maxTokens: z.number().int().positive().max(100000).optional(),
       temperature: z.number().min(0).max(2).optional(),
     })
@@ -163,7 +172,7 @@ export type ConfigFileInput = z.input<typeof configFileSchema>;
  * Validate provider type
  */
 export function isValidProvider(value: string): value is Provider {
-  return ['anthropic', 'openai', 'ollama'].includes(value);
+  return ['anthropic', 'openai', 'ollama', 'bedrock'].includes(value);
 }
 
 /**

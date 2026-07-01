@@ -3,7 +3,7 @@ import type { FileFormat, Provider } from './types';
 /**
  * Provider enum schema
  */
-export declare const providerSchema: z.ZodEnum<["anthropic", "openai", "ollama"]>;
+export declare const providerSchema: z.ZodEnum<["anthropic", "openai", "ollama", "bedrock"]>;
 /**
  * File format enum schema
  */
@@ -16,40 +16,60 @@ export declare const languageCodeSchema: z.ZodString;
  * Provider configuration schema
  */
 export declare const providerConfigSchema: z.ZodEffects<z.ZodObject<{
-    provider: z.ZodEnum<["anthropic", "openai", "ollama"]>;
+    provider: z.ZodEnum<["anthropic", "openai", "ollama", "bedrock"]>;
     apiKey: z.ZodOptional<z.ZodString>;
     model: z.ZodOptional<z.ZodString>;
     baseUrl: z.ZodOptional<z.ZodString>;
     maxTokens: z.ZodOptional<z.ZodNumber>;
     temperature: z.ZodOptional<z.ZodNumber>;
+    region: z.ZodOptional<z.ZodString>;
+    accessKeyId: z.ZodOptional<z.ZodString>;
+    secretAccessKey: z.ZodOptional<z.ZodString>;
+    sessionToken: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
-    provider: "anthropic" | "openai" | "ollama";
+    provider: "anthropic" | "openai" | "ollama" | "bedrock";
     model?: string | undefined;
     baseUrl?: string | undefined;
+    region?: string | undefined;
     maxTokens?: number | undefined;
     temperature?: number | undefined;
     apiKey?: string | undefined;
+    accessKeyId?: string | undefined;
+    secretAccessKey?: string | undefined;
+    sessionToken?: string | undefined;
 }, {
-    provider: "anthropic" | "openai" | "ollama";
+    provider: "anthropic" | "openai" | "ollama" | "bedrock";
     model?: string | undefined;
     baseUrl?: string | undefined;
+    region?: string | undefined;
     maxTokens?: number | undefined;
     temperature?: number | undefined;
     apiKey?: string | undefined;
+    accessKeyId?: string | undefined;
+    secretAccessKey?: string | undefined;
+    sessionToken?: string | undefined;
 }>, {
-    provider: "anthropic" | "openai" | "ollama";
+    provider: "anthropic" | "openai" | "ollama" | "bedrock";
     model?: string | undefined;
     baseUrl?: string | undefined;
+    region?: string | undefined;
     maxTokens?: number | undefined;
     temperature?: number | undefined;
     apiKey?: string | undefined;
+    accessKeyId?: string | undefined;
+    secretAccessKey?: string | undefined;
+    sessionToken?: string | undefined;
 }, {
-    provider: "anthropic" | "openai" | "ollama";
+    provider: "anthropic" | "openai" | "ollama" | "bedrock";
     model?: string | undefined;
     baseUrl?: string | undefined;
+    region?: string | undefined;
     maxTokens?: number | undefined;
     temperature?: number | undefined;
     apiKey?: string | undefined;
+    accessKeyId?: string | undefined;
+    secretAccessKey?: string | undefined;
+    sessionToken?: string | undefined;
 }>;
 /**
  * Translation configuration schema
@@ -131,40 +151,60 @@ export declare const filesConfigSchema: z.ZodObject<{
  */
 export declare const actionConfigSchema: z.ZodObject<{
     provider: z.ZodEffects<z.ZodObject<{
-        provider: z.ZodEnum<["anthropic", "openai", "ollama"]>;
+        provider: z.ZodEnum<["anthropic", "openai", "ollama", "bedrock"]>;
         apiKey: z.ZodOptional<z.ZodString>;
         model: z.ZodOptional<z.ZodString>;
         baseUrl: z.ZodOptional<z.ZodString>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
         temperature: z.ZodOptional<z.ZodNumber>;
+        region: z.ZodOptional<z.ZodString>;
+        accessKeyId: z.ZodOptional<z.ZodString>;
+        secretAccessKey: z.ZodOptional<z.ZodString>;
+        sessionToken: z.ZodOptional<z.ZodString>;
     }, "strip", z.ZodTypeAny, {
-        provider: "anthropic" | "openai" | "ollama";
+        provider: "anthropic" | "openai" | "ollama" | "bedrock";
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
         apiKey?: string | undefined;
+        accessKeyId?: string | undefined;
+        secretAccessKey?: string | undefined;
+        sessionToken?: string | undefined;
     }, {
-        provider: "anthropic" | "openai" | "ollama";
+        provider: "anthropic" | "openai" | "ollama" | "bedrock";
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
         apiKey?: string | undefined;
+        accessKeyId?: string | undefined;
+        secretAccessKey?: string | undefined;
+        sessionToken?: string | undefined;
     }>, {
-        provider: "anthropic" | "openai" | "ollama";
+        provider: "anthropic" | "openai" | "ollama" | "bedrock";
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
         apiKey?: string | undefined;
+        accessKeyId?: string | undefined;
+        secretAccessKey?: string | undefined;
+        sessionToken?: string | undefined;
     }, {
-        provider: "anthropic" | "openai" | "ollama";
+        provider: "anthropic" | "openai" | "ollama" | "bedrock";
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
         apiKey?: string | undefined;
+        accessKeyId?: string | undefined;
+        secretAccessKey?: string | undefined;
+        sessionToken?: string | undefined;
     }>;
     translation: z.ZodObject<{
         batchSize: z.ZodDefault<z.ZodNumber>;
@@ -245,12 +285,16 @@ export declare const actionConfigSchema: z.ZodObject<{
         glossaryFile?: string | undefined;
     };
     provider: {
-        provider: "anthropic" | "openai" | "ollama";
+        provider: "anthropic" | "openai" | "ollama" | "bedrock";
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
         apiKey?: string | undefined;
+        accessKeyId?: string | undefined;
+        secretAccessKey?: string | undefined;
+        sessionToken?: string | undefined;
     };
     git: {
         enabled: boolean;
@@ -279,12 +323,16 @@ export declare const actionConfigSchema: z.ZodObject<{
         glossaryFile?: string | undefined;
     };
     provider: {
-        provider: "anthropic" | "openai" | "ollama";
+        provider: "anthropic" | "openai" | "ollama" | "bedrock";
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
         apiKey?: string | undefined;
+        accessKeyId?: string | undefined;
+        secretAccessKey?: string | undefined;
+        sessionToken?: string | undefined;
     };
     git: {
         enabled?: boolean | undefined;
@@ -307,21 +355,24 @@ export declare const actionConfigSchema: z.ZodObject<{
  */
 export declare const configFileSchema: z.ZodObject<{
     provider: z.ZodOptional<z.ZodObject<{
-        name: z.ZodOptional<z.ZodEnum<["anthropic", "openai", "ollama"]>>;
+        name: z.ZodOptional<z.ZodEnum<["anthropic", "openai", "ollama", "bedrock"]>>;
         model: z.ZodOptional<z.ZodString>;
         baseUrl: z.ZodOptional<z.ZodString>;
+        region: z.ZodOptional<z.ZodString>;
         maxTokens: z.ZodOptional<z.ZodNumber>;
         temperature: z.ZodOptional<z.ZodNumber>;
     }, "strip", z.ZodTypeAny, {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
+        name?: "anthropic" | "openai" | "ollama" | "bedrock" | undefined;
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
     }, {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
+        name?: "anthropic" | "openai" | "ollama" | "bedrock" | undefined;
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
     }>>;
@@ -404,9 +455,10 @@ export declare const configFileSchema: z.ZodObject<{
         glossaryFile?: string | undefined;
     } | undefined;
     provider?: {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
+        name?: "anthropic" | "openai" | "ollama" | "bedrock" | undefined;
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
     } | undefined;
@@ -437,9 +489,10 @@ export declare const configFileSchema: z.ZodObject<{
         glossaryFile?: string | undefined;
     } | undefined;
     provider?: {
-        name?: "anthropic" | "openai" | "ollama" | undefined;
+        name?: "anthropic" | "openai" | "ollama" | "bedrock" | undefined;
         model?: string | undefined;
         baseUrl?: string | undefined;
+        region?: string | undefined;
         maxTokens?: number | undefined;
         temperature?: number | undefined;
     } | undefined;
