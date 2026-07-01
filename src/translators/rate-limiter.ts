@@ -252,6 +252,11 @@ export const PROVIDER_RATE_LIMITS: Record<string, RateLimiterOptions> = {
     requestsPerMinute: 120, // Local, so more lenient
     burstAllowance: 20,
   },
+  bedrock: {
+    requestsPerMinute: 50,
+    tokensPerMinute: 100000,
+    burstAllowance: 5,
+  },
 };
 
 /**

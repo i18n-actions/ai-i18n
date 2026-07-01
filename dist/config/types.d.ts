@@ -1,7 +1,7 @@
 /**
  * Supported LLM providers
  */
-export type Provider = 'anthropic' | 'openai' | 'ollama';
+export type Provider = 'anthropic' | 'openai' | 'ollama' | 'bedrock';
 /**
  * Supported file formats
  */
@@ -16,6 +16,14 @@ export interface ProviderConfig {
     baseUrl?: string;
     maxTokens?: number;
     temperature?: number;
+    /** AWS region (bedrock provider) */
+    region?: string;
+    /** AWS access key ID (bedrock provider — falls back to the default credential chain when omitted) */
+    accessKeyId?: string;
+    /** AWS secret access key (bedrock provider) */
+    secretAccessKey?: string;
+    /** AWS session token for temporary credentials (bedrock provider) */
+    sessionToken?: string;
 }
 /**
  * Anthropic-specific configuration
@@ -40,6 +48,19 @@ export interface OllamaConfig extends ProviderConfig {
     provider: 'ollama';
     baseUrl: string;
     model: string;
+}
+/**
+ * AWS Bedrock-specific configuration
+ *
+ * Credentials are optional: when omitted, the AWS SDK's default credential
+ * provider chain is used (env vars, shared config, IAM roles / OIDC, etc.).
+ */
+export interface BedrockConfig extends ProviderConfig {
+    provider: 'bedrock';
+    region: string;
+    accessKeyId?: string;
+    secretAccessKey?: string;
+    sessionToken?: string;
 }
 /**
  * Translation behavior configuration
@@ -108,6 +129,10 @@ export interface ActionInputs {
     batchSize: string;
     maxRetries: string;
     ollamaUrl?: string;
+    awsRegion?: string;
+    awsAccessKeyId?: string;
+    awsSecretAccessKey?: string;
+    awsSessionToken?: string;
     dryRun: string;
     context?: string;
     glossaryFile?: string;
@@ -120,6 +145,7 @@ export interface ConfigFile {
         name?: Provider;
         model?: string;
         baseUrl?: string;
+        region?: string;
         maxTokens?: number;
         temperature?: number;
     };

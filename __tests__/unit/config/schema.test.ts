@@ -14,6 +14,7 @@ describe('Config Schema', () => {
       expect(providerSchema.parse('anthropic')).toBe('anthropic');
       expect(providerSchema.parse('openai')).toBe('openai');
       expect(providerSchema.parse('ollama')).toBe('ollama');
+      expect(providerSchema.parse('bedrock')).toBe('bedrock');
     });
 
     it('should reject invalid providers', () => {
@@ -86,6 +87,35 @@ describe('Config Schema', () => {
       expect(result.baseUrl).toBe('http://localhost:11434');
     });
 
+    it('should accept valid bedrock config', () => {
+      const config = {
+        provider: 'bedrock',
+        region: 'us-east-1',
+        model: 'anthropic.claude-3-haiku-20240307-v1:0',
+      };
+
+      const result = providerConfigSchema.parse(config);
+
+      expect(result.provider).toBe('bedrock');
+      expect(result.region).toBe('us-east-1');
+    });
+
+    it('should accept bedrock config with explicit credentials', () => {
+      const config = {
+        provider: 'bedrock',
+        region: 'us-east-1',
+        accessKeyId: 'AKIAEXAMPLE',
+        secretAccessKey: 'secret',
+        sessionToken: 'token',
+      };
+
+      const result = providerConfigSchema.parse(config);
+
+      expect(result.accessKeyId).toBe('AKIAEXAMPLE');
+      expect(result.secretAccessKey).toBe('secret');
+      expect(result.sessionToken).toBe('token');
+    });
+
     it('should reject anthropic without apiKey', () => {
       const config = {
         provider: 'anthropic',
@@ -97,6 +127,14 @@ describe('Config Schema', () => {
     it('should reject ollama without baseUrl', () => {
       const config = {
         provider: 'ollama',
+      };
+
+      expect(() => providerConfigSchema.parse(config)).toThrow();
+    });
+
+    it('should reject bedrock without region', () => {
+      const config = {
+        provider: 'bedrock',
       };
 
       expect(() => providerConfigSchema.parse(config)).toThrow();
@@ -142,6 +180,7 @@ describe('Config Schema', () => {
       expect(isValidProvider('anthropic')).toBe(true);
       expect(isValidProvider('openai')).toBe(true);
       expect(isValidProvider('ollama')).toBe(true);
+      expect(isValidProvider('bedrock')).toBe(true);
     });
 
     it('should return false for invalid providers', () => {

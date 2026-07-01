@@ -178,6 +178,10 @@ export function getActionInputs(): ActionInputs {
     batchSize: core.getInput('batch-size') || String(DEFAULT_CONFIG.translation.batchSize),
     maxRetries: core.getInput('max-retries') || String(DEFAULT_CONFIG.translation.maxRetries),
     ollamaUrl: core.getInput('ollama-url') || undefined,
+    awsRegion: core.getInput('aws-region') || undefined,
+    awsAccessKeyId: core.getInput('aws-access-key-id') || undefined,
+    awsSecretAccessKey: core.getInput('aws-secret-access-key') || undefined,
+    awsSessionToken: core.getInput('aws-session-token') || undefined,
     dryRun: core.getInput('dry-run') || 'false',
     context: core.getInput('context') || undefined,
     glossaryFile: core.getInput('glossary-file') || undefined,
@@ -218,6 +222,21 @@ function buildProviderConfig(inputs: ActionInputs, fileConfig: ConfigFile | null
       if (!inputs.model && !fileConfig?.provider?.model) {
         throw new ConfigError('Model is required for Ollama provider');
       }
+      break;
+    case 'bedrock':
+      config.region =
+        inputs.awsRegion ?? fileConfig?.provider?.region ?? process.env.AWS_REGION ?? undefined;
+      if (!config.region) {
+        throw new ConfigError(
+          'AWS region is required for bedrock provider (set the "aws-region" input or AWS_REGION env var)'
+        );
+      }
+      // Explicit credentials are optional — the AWS SDK falls back to its
+      // default credential provider chain (env vars, IAM roles / OIDC, etc.)
+      // when these are omitted.
+      config.accessKeyId = inputs.awsAccessKeyId;
+      config.secretAccessKey = inputs.awsSecretAccessKey;
+      config.sessionToken = inputs.awsSessionToken;
       break;
   }
 

@@ -1,5 +1,5 @@
 name: 'i18n Translate Action'
-description: 'Automatically translate i18n files using LLM providers (Anthropic, OpenAI, Ollama)'
+description: 'Automatically translate i18n files using LLM providers (Anthropic, OpenAI, Ollama, AWS Bedrock)'
 author: 'Your Name'
 
 branding:
@@ -8,12 +8,12 @@ branding:
 
 inputs:
   provider:
-    description: 'LLM provider to use (anthropic, openai, ollama)'
+    description: 'LLM provider to use (anthropic, openai, ollama, bedrock)'
     required: true
     default: 'anthropic'
 
   api-key:
-    description: 'API key for the LLM provider (not required for Ollama)'
+    description: 'API key for the LLM provider (not required for Ollama or Bedrock)'
     required: false
 
   model:
@@ -69,6 +69,26 @@ inputs:
     description: 'Ollama server URL (for ollama provider)'
     required: false
     default: 'http://localhost:11434'
+
+  aws-region:
+    description: 'AWS region for the bedrock provider (e.g., us-east-1)'
+    required: false
+    default: ''
+
+  aws-access-key-id:
+    description: 'AWS access key ID for the bedrock provider. Optional — falls back to the default AWS credential chain (e.g., aws-actions/configure-aws-credentials / OIDC) when omitted.'
+    required: false
+    default: ''
+
+  aws-secret-access-key:
+    description: 'AWS secret access key for the bedrock provider (paired with aws-access-key-id).'
+    required: false
+    default: ''
+
+  aws-session-token:
+    description: 'AWS session token for temporary credentials (bedrock provider).'
+    required: false
+    default: ''
 
   dry-run:
     description: 'Run without making actual changes'

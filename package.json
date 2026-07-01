@@ -27,7 +27,9 @@
     "xliff",
     "llm",
     "anthropic",
-    "openai"
+    "openai",
+    "aws",
+    "bedrock"
   ],
   "author": "",
   "license": "MIT",
@@ -35,6 +37,7 @@
     "@actions/core": "^1.10.1",
     "@actions/github": "^6.0.0",
     "@anthropic-ai/sdk": "^0.17.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.1077.0",
     "axios": "^1.6.5",
     "cldr-core": "^44.0.0",
     "fast-xml-parser": "^4.3.3",

@@ -9,6 +9,7 @@ import { createProviderRateLimiter, RateLimiter } from './rate-limiter';
 import { AnthropicTranslator } from './providers/anthropic';
 import { OpenAITranslator } from './providers/openai';
 import { OllamaTranslator } from './providers/ollama';
+import { BedrockTranslator } from './providers/bedrock';
 
 /**
  * Options for the translator factory
@@ -54,6 +55,9 @@ export function createTranslator(config: ProviderConfig): BaseTranslator {
     case 'ollama':
       return new OllamaTranslator(config);
 
+    case 'bedrock':
+      return new BedrockTranslator(config);
+
     default:
       throw new ConfigError(`Unknown provider: ${config.provider as string}`);
   }
@@ -70,6 +74,8 @@ export function getDefaultModel(provider: Provider): string {
       return 'gpt-4o-mini';
     case 'ollama':
       return 'llama3.2';
+    case 'bedrock':
+      return 'anthropic.claude-3-haiku-20240307-v1:0';
     default:
       throw new ConfigError(`Unknown provider: ${provider as string}`);
   }

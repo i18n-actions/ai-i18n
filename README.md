@@ -1,27 +1,123 @@
-# i18n Translate Action
+# ai-i18n
 
-A GitHub Action that automatically translates i18n files using LLM providers (Anthropic Claude, OpenAI GPT, or Ollama).
+**Automated i18n translation for GitHub workflows, powered by LLMs.**
 
-## Features
+Translate your app's localization files on every push. Drop in a GitHub Action, point it at your translation files, and get pull-ready translations in seconds — not days.
 
-- **Multiple LLM Providers**: Support for Anthropic Claude, OpenAI GPT, and local Ollama models
-- **Multiple Formats**: XLIFF 1.2, XLIFF 2.0, JSON (flat and nested)
-- **ICU Message Format**: Intelligent handling of plurals with CLDR rules for 20+ languages
-- **Change Detection**: Only translates new or modified strings using content hashing
-- **Rate Limiting**: Built-in rate limiting and retry logic for API calls
-- **Batch Processing**: Efficient batching of translation requests
-- **Git Integration**: Automatic commits of translated files
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: anthropic
+    api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    target-languages: de,fr,es,ja
+    files: 'src/locales/**/*.xliff'
+```
+
+---
+
+## Why ai-i18n?
+
+| Problem | Solution |
+|---|---|
+| Translations lag behind development by weeks | Translations ship with the code that needs them |
+| Sending files to translators is a manual process | Fully automated — runs on push, commit, or schedule |
+| Plural rules differ across languages | CLDR-aware ICU MessageFormat handling for 20+ languages |
+| Re-translating unchanged strings wastes money | Content hashing tracks what changed — only new/modified strings hit the API |
+| XLIFF inline elements get mangled | Placeholders like `<x id="PH"/>` are extracted, preserved, and reconstructed |
+
+## Supported Formats
+
+| Format | Extensions | Notes |
+|--------|------------|-------|
+| **XLIFF 1.2** | `.xliff`, `.xlf` | Full inline element preservation (`<x>`, `<ph>`, `<g>`, etc.) |
+| **XLIFF 2.0** | `.xliff`, `.xlf` | Segment-level source/target with `<ph>`, `<pc>`, `<sc>`/`<ec>` |
+| **JSON (flat)** | `.json` | `"button.save": "Save"` |
+| **JSON (nested)** | `.json` | `{ "button": { "save": "Save" } }` |
+
+Format is auto-detected. Override with `format: xliff-1.2` if needed.
+
+## Supported Providers
+
+### Anthropic Claude
+
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: anthropic
+    api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    model: claude-3-haiku-20240307  # default — fast and cheap
+```
+
+### OpenAI
+
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: openai
+    api-key: ${{ secrets.OPENAI_API_KEY }}
+    model: gpt-4o-mini  # default
+```
+
+### Ollama (self-hosted)
+
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: ollama
+    model: llama3.2
+    ollama-url: http://localhost:11434
+```
+
+No API key required. Run any model you can host.
+
+### AWS Bedrock
+
+Uses the model-agnostic Bedrock Converse API, so any Converse-capable model works — Anthropic Claude, Meta Llama, Amazon Nova/Titan, Mistral, Cohere, and more.
+
+The recommended setup uses [`aws-actions/configure-aws-credentials`](https://github.com/aws-actions/configure-aws-credentials) (OIDC or keys), which populates the standard AWS credential chain — then the action only needs a region:
+
+```yaml
+- uses: aws-actions/configure-aws-credentials@v4
+  with:
+    role-to-assume: arn:aws:iam::123456789012:role/bedrock-translate
+    aws-region: us-east-1
+
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: bedrock
+    aws-region: us-east-1
+    model: anthropic.claude-3-haiku-20240307-v1:0  # default
+    target-languages: de,fr,es
+    files: 'src/locales/**/*.xliff'
+```
+
+Or pass credentials explicitly (they fall back to the default AWS credential chain when omitted):
+
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: bedrock
+    aws-region: us-east-1
+    aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    model: meta.llama3-70b-instruct-v1:0
+```
+
+Make sure the target model is enabled in your account's Bedrock **Model access** settings for the chosen region. Some models require a cross-region inference profile ID (e.g. `us.anthropic.claude-...`) rather than the plain foundation-model ID.
+
+---
 
 ## Quick Start
 
+### 1. Translate on push to main
+
 ```yaml
-name: Translate i18n files
+name: Translate
 
 on:
   push:
     branches: [main]
-    paths:
-      - 'locales/en/**'
+    paths: ['locales/en/**']
 
 jobs:
   translate:
@@ -29,37 +125,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Translate
-        uses: your-org/i18n-translate-action@v1
+      - uses: i18n-actions/ai-i18n@v0.5
         with:
           provider: anthropic
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           source-language: en
-          target-languages: de,fr,es
+          target-languages: de,fr,es,ja,ko,zh
           files: 'locales/en/**/*.json'
+          format: json-nested
 ```
+
+### 2. Translate XLIFF files from Angular / iOS / Android
+
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: openai
+    api-key: ${{ secrets.OPENAI_API_KEY }}
+    target-languages: de,fr
+    files: 'src/i18n/*.xliff'
+```
+
+### 3. Dry run (preview without committing)
+
+```yaml
+- uses: i18n-actions/ai-i18n@v0.5
+  with:
+    provider: anthropic
+    api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    target-languages: de
+    files: '**/*.xliff'
+    dry-run: true
+    commit: false
+```
+
+---
 
 ## Inputs
 
 | Input | Description | Required | Default |
 |-------|-------------|----------|---------|
-| `provider` | LLM provider (`anthropic`, `openai`, `ollama`) | Yes | `anthropic` |
-| `api-key` | API key for the provider | No* | - |
-| `model` | Model to use | No | Provider default |
-| `source-language` | Source language code | Yes | `en` |
-| `target-languages` | Comma-separated target language codes | Yes | - |
+| `provider` | `anthropic`, `openai`, `ollama`, or `bedrock` | Yes | `anthropic` |
+| `api-key` | API key (required for anthropic/openai) | No | — |
+| `model` | Model name | No | Provider default |
+| `source-language` | Source language code (BCP-47) | Yes | `en` |
+| `target-languages` | Comma-separated target codes | Yes | — |
 | `files` | Glob pattern for translation files | Yes | `**/*.xliff` |
-| `format` | File format (`xliff-1.2`, `xliff-2.0`, `json-flat`, `json-nested`, `auto`) | No | `auto` |
-| `config-file` | Path to configuration file | No | `.i18n-translate.yml` |
-| `commit` | Whether to commit changes | No | `true` |
-| `commit-message` | Commit message | No | `chore(i18n): update translations` |
+| `format` | `xliff-1.2`, `xliff-2.0`, `json-flat`, `json-nested`, `auto` | No | `auto` |
+| `config-file` | Path to config file | No | `.i18n-translate.yml` |
+| `commit` | Commit translated files | No | `true` |
+| `commit-message` | Git commit message | No | `chore(i18n): update translations` |
 | `batch-size` | Strings per API call | No | `10` |
-| `max-retries` | Maximum retry attempts | No | `3` |
+| `max-retries` | Max retry attempts | No | `3` |
 | `ollama-url` | Ollama server URL | No | `http://localhost:11434` |
-| `dry-run` | Run without making changes | No | `false` |
-| `context` | Additional context for translations | No | - |
-
-*API key is required for Anthropic and OpenAI providers.
+| `aws-region` | AWS region (required for bedrock) | No | — |
+| `aws-access-key-id` | AWS access key ID (bedrock; falls back to default credential chain) | No | — |
+| `aws-secret-access-key` | AWS secret access key (bedrock) | No | — |
+| `aws-session-token` | AWS session token for temporary credentials (bedrock) | No | — |
+| `dry-run` | Preview without writing files | No | `false` |
+| `context` | Additional context for the translator | No | — |
 
 ## Outputs
 
@@ -67,188 +191,121 @@ jobs:
 |--------|-------------|
 | `translated-count` | Number of strings translated |
 | `files-updated` | Number of files updated |
-| `report` | Translation report in markdown |
-| `commit-sha` | SHA of the commit (if committed) |
+| `report` | Markdown translation report |
+| `commit-sha` | Commit SHA (if committed) |
+| `skipped` | Whether the run was skipped |
+| `skip-reason` | Why it was skipped |
+
+---
 
 ## Configuration File
 
-You can use a `.i18n-translate.yml` file for configuration:
+For projects that need more control, create `.i18n-translate.yml`:
 
 ```yaml
 provider:
-  name: anthropic
+  name: anthropic          # anthropic | openai | ollama | bedrock
   model: claude-3-haiku-20240307
   temperature: 0.3
+  # region: us-east-1      # required when name: bedrock
 
 translation:
   batchSize: 15
   maxRetries: 3
-  context: "Mobile app UI translations"
+  rateLimitPerMinute: 50
+  context: "E-commerce mobile app — casual, friendly tone"
   preserveFormatting: true
   preservePlaceholders: true
-
-git:
-  enabled: true
-  commitMessage: "chore(i18n): update translations"
 
 files:
   pattern: "locales/**/*.json"
   format: json-nested
   sourceLanguage: en
-  targetLanguages:
-    - de
-    - fr
-    - es
-    - ja
-  exclude:
-    - "**/node_modules/**"
+  targetLanguages: [de, fr, es, ja, ko, zh, pt, it]
+  exclude: ["**/node_modules/**"]
+
+git:
+  enabled: true
+  commitMessage: "chore(i18n): update translations"
 ```
 
-## Supported File Formats
+---
 
-### XLIFF 1.2
+## How It Works
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<xliff version="1.2" xmlns="urn:oasis:names:tc:xliff:document:1.2">
-  <file source-language="en" target-language="de">
-    <body>
-      <trans-unit id="greeting">
-        <source>Hello, World!</source>
-        <target></target>
-      </trans-unit>
-    </body>
-  </file>
-</xliff>
+```
+Source file changed
+       |
+       v
+  Extract units ──> Diff against hash store ──> Only new/modified strings
+       |                                                  |
+       v                                                  v
+  Detect format                                    Batch + translate
+  (XLIFF / JSON)                                   (with rate limiting
+                                                    and retry logic)
+       |                                                  |
+       v                                                  v
+  Merge translations ──> Write files ──> Update hash store ──> Commit
 ```
 
-### XLIFF 2.0
+### Change Detection
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<xliff version="2.0" srcLang="en" trgLang="de" xmlns="urn:oasis:names:tc:xliff:document:2.0">
-  <file id="messages">
-    <unit id="greeting">
-      <segment>
-        <source>Hello, World!</source>
-        <target></target>
-      </segment>
-    </unit>
-  </file>
-</xliff>
+A `.i18n-hashes.json` file tracks content hashes for every translation unit. On each run, only strings whose source text has changed (or that are brand new) get sent to the API. This keeps costs predictable and runs fast.
+
+### Placeholder Preservation
+
+XLIFF inline elements are extracted with full metadata, sent to the LLM as `{{MARKER}}` tokens, and reconstructed as proper XML in the output:
+
+```
+Source XML:    Click <x id="PH"/> to continue
+LLM sees:     Click {{PH}} to continue
+LLM returns:  Klicken Sie auf {{PH}}, um fortzufahren
+Output XML:   Klicken Sie auf <x id="PH"/>, um fortzufahren
 ```
 
-### JSON (Flat)
+Supported inline elements: `<x>`, `<ph>`, `<bx>`, `<ex>`, `<bpt>`, `<ept>`, `<g>`, `<pc>`, `<sc>`, `<ec>`, and more.
 
-```json
-{
-  "greeting": "Hello, World!",
-  "button.save": "Save"
-}
+### ICU Plural Handling
+
+When translating to languages with different plural rules, the action generates the correct categories automatically:
+
+```
+English (one/other):
+  {count, plural, one {# item} other {# items}}
+
+Russian (one/few/many/other):
+  {count, plural, one {# элемент} few {# элемента} many {# элементов} other {# элементов}}
+
+Arabic (zero/one/two/few/many/other):
+  {count, plural, zero {لا عناصر} one {عنصر واحد} two {عنصران} few {# عناصر} many {# عنصرًا} other {# عنصر}}
 ```
 
-### JSON (Nested)
+Plural rules are sourced from CLDR data for 20+ languages.
 
-```json
-{
-  "greeting": "Hello, World!",
-  "button": {
-    "save": "Save",
-    "cancel": "Cancel"
-  }
-}
-```
+### Loop Prevention
 
-## ICU Message Format Support
-
-The action intelligently handles ICU MessageFormat patterns, including plurals:
-
-```json
-{
-  "items_count": "{count, plural, one {# item} other {# items}}"
-}
-```
-
-When translating to languages with different plural rules (like Russian, Arabic, or Polish), the action automatically generates the correct plural forms based on CLDR rules.
-
-### Supported Plural Rules
-
-- **Simple (one/other)**: English, German, Spanish, etc.
-- **Complex (one/few/many/other)**: Russian, Polish, Ukrainian, Czech
-- **Full (zero/one/two/few/many/other)**: Arabic
-- **None (other only)**: Japanese, Chinese, Korean
-
-## Provider Configuration
-
-### Anthropic Claude
-
-```yaml
-- uses: your-org/i18n-translate-action@v1
-  with:
-    provider: anthropic
-    api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-    model: claude-3-haiku-20240307  # or claude-3-sonnet, claude-3-opus
-```
-
-### OpenAI GPT
-
-```yaml
-- uses: your-org/i18n-translate-action@v1
-  with:
-    provider: openai
-    api-key: ${{ secrets.OPENAI_API_KEY }}
-    model: gpt-4o-mini  # or gpt-4o, gpt-4-turbo
-```
-
-### Ollama (Self-hosted)
-
-```yaml
-- uses: your-org/i18n-translate-action@v1
-  with:
-    provider: ollama
-    model: llama3.2
-    ollama-url: http://localhost:11434
-```
-
-## Preventing Infinite Loops
-
-The action automatically detects and skips runs triggered by its own commits. You can also use skip markers:
+The action skips runs triggered by its own commits. You can also add explicit skip markers:
 
 ```yaml
 commit-message: "chore(i18n): update translations [skip i18n]"
 ```
 
+---
+
 ## Development
 
-### Prerequisites
-
-- Node.js 20.x
-- npm
-
-### Setup
-
 ```bash
-npm install
+npm install        # install dependencies
+npm test           # run tests (236 tests across 18 suites)
+npm run build      # compile with ncc
+npm run lint       # eslint
+npm run format     # prettier
+npm run type-check # typescript
 ```
 
-### Build
-
-```bash
-npm run build
-```
-
-### Test
-
-```bash
-npm test
-```
-
-### Lint
-
-```bash
-npm run lint
-```
+Requires Node.js 20+.
 
 ## License
 
 MIT
+
