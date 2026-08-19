@@ -1,5 +1,5 @@
 /**
- * Base error class for i18n-translate-action
+ * Base error class for ai-i18n
  */
 export declare class I18nTranslateError extends Error {
     readonly code: string;
