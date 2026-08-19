@@ -5,7 +5,7 @@
 Translate your app's localization files on every push. Drop in a GitHub Action, point it at your translation files, and get pull-ready translations in seconds — not days.
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: anthropic
     api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -41,7 +41,7 @@ Format is auto-detected. Override with `format: xliff-1.2` if needed.
 ### Anthropic Claude
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: anthropic
     api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -51,7 +51,7 @@ Format is auto-detected. Override with `format: xliff-1.2` if needed.
 ### OpenAI
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: openai
     api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -61,7 +61,7 @@ Format is auto-detected. Override with `format: xliff-1.2` if needed.
 ### Ollama (self-hosted)
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: ollama
     model: llama3.2
@@ -82,7 +82,7 @@ The recommended setup uses [`aws-actions/configure-aws-credentials`](https://git
     role-to-assume: arn:aws:iam::123456789012:role/bedrock-translate
     aws-region: us-east-1
 
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: bedrock
     aws-region: us-east-1
@@ -94,7 +94,7 @@ The recommended setup uses [`aws-actions/configure-aws-credentials`](https://git
 Or pass credentials explicitly (they fall back to the default AWS credential chain when omitted):
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: bedrock
     aws-region: us-east-1
@@ -125,7 +125,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: i18n-actions/ai-i18n@v0.5
+      - uses: i18n-actions/ai-i18n@v0.9.0
         with:
           provider: anthropic
           api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -138,7 +138,7 @@ jobs:
 ### 2. Translate XLIFF files from Angular / iOS / Android
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: openai
     api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -149,7 +149,7 @@ jobs:
 ### 3. Dry run (preview without committing)
 
 ```yaml
-- uses: i18n-actions/ai-i18n@v0.5
+- uses: i18n-actions/ai-i18n@v0.9.0
   with:
     provider: anthropic
     api-key: ${{ secrets.ANTHROPIC_API_KEY }}
