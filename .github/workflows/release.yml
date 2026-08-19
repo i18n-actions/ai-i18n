@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-major-tag:
+    name: Move floating major tag
+    runs-on: ubuntu-latest
+    # Only for stable vX.Y.Z releases - prereleases must not move the floating tag.
+    if: ${{ !github.event.release.prerelease }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Move major tag to release commit
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag '$TAG' is not a stable vX.Y.Z tag - skipping."
+            exit 0
+          fi
+          MAJOR="v${BASH_REMATCH[1]}"
+          echo "Pointing $MAJOR at $SHA (release $TAG)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f "$MAJOR" "$SHA"
+          git push -f origin "refs/tags/$MAJOR"
