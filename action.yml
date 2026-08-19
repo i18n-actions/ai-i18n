@@ -1,6 +1,6 @@
-name: 'i18n Translate Action'
+name: 'ai-i18n'
 description: 'Automatically translate i18n files using LLM providers (Anthropic, OpenAI, Ollama, AWS Bedrock)'
-author: 'Your Name'
+author: 'Chris Portscheller'
 
 branding:
   icon: 'globe'
